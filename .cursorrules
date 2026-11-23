@@ -1,0 +1,7 @@
+# RÈGLES D'ARCHITECTURE — PROJET BOB (A.C.R.)
+
+1. RÉFÉRENCE UNIQUE : Lis toujours `BOB_BLUEPRINT.md` à la racine avant toute création ou modification de code.
+2. SÉCURITÉ MULTI-TENANT : Aucune requête vers PostgreSQL ou le moteur RAG ne doit s'exécuter sans filtrage strict par `tenant_id` (doublé par Row-Level Security).
+3. ZÉRO HALLUCINATION : Le moteur RAG doit obligatoirement citer le document source et sa version. En cas de score de confiance insuffisant, déclencher le flux `unanswered_flag = true` (remontée anonymisée vers l'Admin + escalade référent).
+4. TRAÇABILITÉ & RGPD : Tout document importé génère un hash SHA-256 et un horodatage. Les questions posées par les salariés sont strictement anonymisées dans `query_logs`.
+5. LANGUE : Code, noms de variables et tables SQL en anglais ; interface utilisateur, documentation et échanges en français (avec support `i18n` prévu).
