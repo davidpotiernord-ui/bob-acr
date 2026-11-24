@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
+const db = require('./services/db');
 
 const app = express();
 app.use(helmet());
@@ -10,6 +11,22 @@ app.use(express.json({ limit: '1mb' }));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'bob-api-gateway' });
+});
+
+app.get('/health/db', async (req, res) => {
+  try {
+    const result = await db.query('SELECT 1 AS ok, current_database() AS database');
+    res.json({
+      status: 'ok',
+      db: result.rows[0],
+    });
+  } catch (err) {
+    console.error('Erreur connexion PostgreSQL:', err.message);
+    res.status(500).json({
+      status: 'error',
+      message: 'Database connection failed',
+    });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
