@@ -160,3 +160,48 @@ CREATE POLICY tenant_isolation_chunks ON document_chunks
         is_shared_base = TRUE 
         OR tenant_id = current_setting('app.current_tenant_id', true)::uuid
     );
+
+-- ============================================================================
+-- 10. MISE À JOUR : AUTHENTIFICATION HYBRIDE (SANS SSO) & OPT-OUT SOCLE COMMUN
+-- ============================================================================
+
+ALTER TABLE tenants
+    ADD COLUMN IF NOT EXISTS auth_mode VARCHAR(30) NOT NULL DEFAULT 'sso', -- 'sso' ou 'local_email'
+    ADD COLUMN IF NOT EXISTS allowed_email_domains TEXT[] DEFAULT '{}',
+    ADD COLUMN IF NOT EXISTS use_shared_base BOOLEAN NOT NULL DEFAULT TRUE;
+
+ALTER TABLE users
+    ALTER COLUMN sso_subject_id DROP NOT NULL,
+    ADD COLUMN IF NOT EXISTS password_hash TEXT,
+    ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(30) NOT NULL DEFAULT 'sso';
+
+-- Remplacement des politiques RLS documents & chunks pour respecter use_shared_base du tenant
+DROP POLICY IF EXISTS tenant_isolation_documents ON documents;
+CREATE POLICY tenant_isolation_documents ON documents
+    USING (
+        tenant_id = current_setting('app.current_tenant_id', true)::uuid
+        OR (
+            is_shared_base = TRUE
+            AND EXISTS (
+                SELECT 1 FROM tenants t
+                WHERE t.id = current_setting('app.current_tenant_id', true)::uuid
+                  AND t.use_shared_base = TRUE
+            )
+        )
+    );
+
+DROP POLICY IF EXISTS tenant_isolation_chunks ON document_chunks;
+CREATE POLICY tenant_isolation_chunks ON document_chunks
+    USING (
+        tenant_id = current_setting('app.current_tenant_id', true)::uuid
+        OR (
+            is_shared_base = TRUE
+            AND EXISTS (
+                SELECT 1 FROM tenants t
+                WHERE t.id = current_setting('app.current_tenant_id', true)::uuid
+                  AND t.use_shared_base = TRUE
+            )
+        )
+    );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_tenant_email ON users (tenant_id, email);
