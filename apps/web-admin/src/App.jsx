@@ -14,6 +14,17 @@ import {
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://bob-acr-api.osc-fr1.scalingo.io/api';
+
+function getAuthHeaders(extra = {}) {
+  const token =
+    (typeof window !== "undefined" && window.sessionStorage?.getItem("bob_admin_key")) ||
+    import.meta.env.VITE_BOB_ADMIN_KEY ||
+    "";
+  return {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra,
+  };
+}
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
 
 export default function App() {
@@ -39,7 +50,7 @@ export default function App() {
   const fetchAll = async () => {
     setLoading(true);
     setErrorMsg('');
-    const headers = { 'x-tenant-id': DEMO_TENANT_ID };
+    const headers = getAuthHeaders();
     try {
       const [ovRes, docRes, ackRes, escRes] = await Promise.all([
         fetch(`${API_BASE}/admin/overview`, { headers }),
@@ -84,7 +95,7 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-tenant-id': DEMO_TENANT_ID,
+          ...getAuthHeaders(),
         },
         body: JSON.stringify({
           title,
