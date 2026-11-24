@@ -7,6 +7,7 @@ const statusRoute = require('./routes/status');
 const tenantAuth = require('./middleware/tenantAuth');
 const queryRoute = require('./routes/query');
 const documentsRoute = require('./routes/documents');
+const acknowledgmentsRoute = require('./routes/acknowledgments');
 
 const app = express();
 app.use(helmet());
@@ -36,6 +37,7 @@ app.get('/health/db', async (req, res) => {
 app.use('/api', statusRoute);
 app.use('/api', tenantAuth, queryRoute);
 app.use('/api', tenantAuth, documentsRoute);
+app.use('/api', tenantAuth, acknowledgmentsRoute);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
