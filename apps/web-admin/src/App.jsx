@@ -39,6 +39,11 @@ export default function App() {
   const [escalations, setEscalations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [adminKeyInput, setAdminKeyInput] = useState(() =>
+    (typeof window !== "undefined" && window.sessionStorage?.getItem("bob_admin_key")) ||
+    import.meta.env.VITE_BOB_ADMIN_KEY ||
+    ""
+  );
 
   const [title, setTitle] = useState('');
   const [moduleCode, setModuleCode] = useState('socle_ri');
@@ -148,7 +153,45 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <>
+      <div className="bg-slate-900 text-slate-100 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2 border-b border-slate-800">
+        <span className="font-medium text-slate-300">Clé Admin API (session) :</span>
+        <div className="flex items-center gap-2 flex-1 max-w-xl">
+          <input
+            type="password"
+            value={adminKeyInput}
+            onChange={(e) => setAdminKeyInput(e.target.value)}
+            placeholder="bob_admin_..."
+            className="w-full rounded bg-slate-800 border border-slate-700 px-2.5 py-1 text-slate-100 font-mono text-xs focus:outline-none focus:border-sky-400"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.sessionStorage?.setItem("bob_admin_key", adminKeyInput.trim());
+              }
+              fetchAll();
+            }}
+            className="rounded bg-sky-600 hover:bg-sky-500 px-3 py-1 font-medium text-white shrink-0"
+          >
+            Appliquer
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAdminKeyInput("");
+              if (typeof window !== "undefined") {
+                window.sessionStorage?.removeItem("bob_admin_key");
+              }
+              fetchAll();
+            }}
+            className="rounded bg-slate-700 hover:bg-slate-600 px-2.5 py-1 text-slate-200 shrink-0"
+          >
+            Effacer
+          </button>
+        </div>
+      </div>
+      <div className="min-h-screen flex flex-col bg-slate-50">
       <header className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <ShieldCheck className="w-6 h-6 text-indigo-400" />
@@ -435,5 +478,6 @@ export default function App() {
         )}
       </main>
     </div>
-  );
+  
+    </>);
 }
