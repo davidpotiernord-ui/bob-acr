@@ -3,6 +3,7 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const db = require('./services/db');
+const statusRoute = require('./routes/status');
 
 const app = express();
 app.use(helmet());
@@ -28,6 +29,8 @@ app.get('/health/db', async (req, res) => {
     });
   }
 });
+
+app.use('/api', statusRoute);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
