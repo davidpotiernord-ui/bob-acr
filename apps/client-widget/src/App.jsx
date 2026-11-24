@@ -188,8 +188,7 @@ export default function App() {
                       <div key={sIdx} className="text-[11px] text-slate-500 flex items-start gap-1">
                         <BookOpen className="w-3 h-3 mt-0.5 text-indigo-600 shrink-0" />
                         <span>
-                          <strong>{src.title}</strong> ({src.version}
-                          {src.page ? `, p.${src.page}` : ''}) — {src.origin}
+                          <strong>{src.title || src.module_code || "Source"}</strong>{(src.version || src.page_number || src.page) ? ` (${[src.version, (src.page_number || src.page) ? `p.${src.page_number || src.page}` : ""].filter(Boolean).join(", ")})` : ""} — {src.origin || (src.document_id ? `doc ${src.document_id.slice(0, 8)}` : "extrait")}
                         </span>
                       </div>
                     ))}
