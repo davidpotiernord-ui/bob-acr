@@ -121,6 +121,31 @@ export default function App() {
     }
   };
 
+  const handleExportCsv = () => {
+    const headers = [
+      'id',
+      'acknowledged_at',
+      'user_email',
+      'full_name',
+      'department',
+      'document_id',
+      'document_title',
+      'document_version',
+      'module_code',
+      'sha256_hash',
+    ];
+    const escapeCsv = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+    const rows = acknowledgments.map((a) => headers.map((h) => escapeCsv(a[h])).join(','));
+    const csv = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `bob-acr-emargements-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleExportProof = () => {
     const payload = {
       exported_at: new Date().toISOString(),
@@ -209,7 +234,7 @@ export default function App() {
             Synchroniser
           </button>
           <button
-            onClick={handleExportProof}
+            onClick={() => { handleExportProof(); handleExportCsv(); }}
             className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-2 rounded-lg flex items-center gap-2"
           >
             <Download className="w-4 h-4" />
