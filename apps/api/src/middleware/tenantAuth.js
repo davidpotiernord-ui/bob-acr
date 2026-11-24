@@ -1,54 +1,69 @@
-const db = require('../services/db');
+import crypto from 'crypto';
+import { pool } from '../db/pool.js';
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function tenantAuth(req, res, next) {
+function sha256(value) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function extractApiKey(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.slice(7).trim();
+  }
+  if (typeof req.headers['x-api-key'] === 'string') {
+    return req.headers['x-api-key'].trim();
+  }
+  return null;
+}
+
+export async function tenantAuth(req, res, next) {
   try {
-    const rawTenantId =
-      req.header('x-tenant-id') ||
-      (req.body && req.body.tenant_id) ||
-      (req.query && req.query.tenant_id);
+    const rawKey = extractApiKey(req);
 
-    if (!rawTenantId || typeof rawTenantId !== 'string') {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Missing tenant identifier',
-      });
+    if (rawKey) {
+      const keyHash = sha256(rawKey);
+      const { rows } = await pool.query(
+        `SELECT k.id, k.tenant_id, k.role, t.name AS tenant_name
+         FROM tenant_api_keys k
+         JOIN tenants t ON t.id = k.tenant_id
+         WHERE k.key_hash = $1 AND k.revoked_at IS NULL
+         LIMIT 1`,
+        [keyHash]
+      );
+
+      if (rows.length === 0) {
+        return res.status(401).json({ error: 'Clé API invalide ou révoquée' });
+      }
+
+      req.tenantId = rows[0].tenant_id;
+      req.tenantName = rows[0].tenant_name;
+      req.apiKeyRole = rows[0].role;
+
+      pool.query('UPDATE tenant_api_keys SET last_used_at = NOW() WHERE id = $1', [rows[0].id]).catch(() => {});
+      return next();
     }
 
-    const tenantId = rawTenantId.trim();
-    if (!UUID_REGEX.test(tenantId)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Invalid tenant identifier format',
-      });
+    if (process.env.ALLOW_LEGACY_TENANT_HEADER === 'true') {
+      const legacyTenantId = req.headers['x-tenant-id'];
+      if (typeof legacyTenantId === 'string' && UUID_REGEX.test(legacyTenantId)) {
+        req.tenantId = legacyTenantId;
+        req.apiKeyRole = 'admin';
+        return next();
+      }
     }
 
-    const result = await db.query(
-      `SELECT id, name, slug, country_code, plan_tier, active_modules, escalation_contacts
-       FROM tenants
-       WHERE id = $1
-       LIMIT 1`,
-      [tenantId]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(403).json({
-        status: 'error',
-        message: 'Unknown or unauthorized tenant',
-      });
-    }
-
-    req.tenant = result.rows[0];
-    return next();
+    return res.status(401).json({ error: 'Authentification requise (Authorization: Bearer <api_key>)' });
   } catch (err) {
-    console.error('Erreur tenantAuth middleware:', err.message);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Tenant verification failed',
-    });
+    console.error('Erreur tenantAuth:', err);
+    return res.status(500).json({ error: 'Erreur interne authentification' });
   }
 }
 
-module.exports = tenantAuth;
+export function requireAdminRole(req, res, next) {
+  if (req.apiKeyRole !== 'admin') {
+    return res.status(403).json({ error: 'Droits administrateur requis pour cette action' });
+  }
+  return next();
+}
