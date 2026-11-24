@@ -18,14 +18,24 @@ function extractApiKey(req) {
   return null;
 }
 
+async function runQuery(text, params) {
+  if (db && typeof db.query === 'function') {
+    return db.query(text, params);
+  }
+  if (db && db.pool && typeof db.pool.query === 'function') {
+    return db.pool.query(text, params);
+  }
+  throw new Error('Pool PostgreSQL indisponible dans services/db');
+}
+
 async function tenantAuth(req, res, next) {
   try {
     const rawKey = extractApiKey(req);
 
     if (rawKey) {
       const keyHash = sha256(rawKey);
-      const { rows } = await db.pool.query(
-        `SELECT k.id, k.tenant_id, k.role, t.name AS tenant_name
+      const { rows } = await runQuery(
+        `SELECT k.id, k.tenant_id, k.role
          FROM tenant_api_keys k
          JOIN tenants t ON t.id = k.tenant_id
          WHERE k.key_hash = $1 AND k.revoked_at IS NULL
@@ -38,10 +48,10 @@ async function tenantAuth(req, res, next) {
       }
 
       req.tenantId = rows[0].tenant_id;
-      req.tenantName = rows[0].tenant_name;
+      req.tenant = { id: rows[0].tenant_id };
       req.apiKeyRole = rows[0].role;
 
-      db.pool.query('UPDATE tenant_api_keys SET last_used_at = NOW() WHERE id = $1', [rows[0].id]).catch(() => {});
+      runQuery('UPDATE tenant_api_keys SET last_used_at = NOW() WHERE id = $1', [rows[0].id]).catch(() => {});
       return next();
     }
 
@@ -49,6 +59,7 @@ async function tenantAuth(req, res, next) {
       const legacyTenantId = req.headers['x-tenant-id'];
       if (typeof legacyTenantId === 'string' && UUID_REGEX.test(legacyTenantId)) {
         req.tenantId = legacyTenantId;
+        req.tenant = { id: legacyTenantId };
         req.apiKeyRole = 'admin';
         return next();
       }
