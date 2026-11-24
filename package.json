@@ -1,0 +1,11 @@
+{
+"name": "bob-acr-monorepo",
+"private": true,
+"engines": {
+"node": ">=20"
+},
+"scripts": {
+"build": "npm --prefix apps/api install && npm --prefix apps/api run build --if-present",
+"start": "npm --prefix apps/api run start"
+}
+}
