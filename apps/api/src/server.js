@@ -8,6 +8,7 @@ const tenantAuth = require('./middleware/tenantAuth');
 const queryRoute = require('./routes/query');
 const documentsRoute = require('./routes/documents');
 const acknowledgmentsRoute = require('./routes/acknowledgments');
+const adminRoute = require('./routes/admin');
 
 const app = express();
 app.use(helmet());
@@ -38,6 +39,7 @@ app.use('/api', statusRoute);
 app.use('/api', tenantAuth, queryRoute);
 app.use('/api', tenantAuth, documentsRoute);
 app.use('/api', tenantAuth, acknowledgmentsRoute);
+app.use('/api', tenantAuth, adminRoute);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
