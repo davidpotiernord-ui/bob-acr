@@ -196,3 +196,9 @@ CREATE TABLE admin_audit_logs (
 ### Phase 4 : Lancement & Déploiement Pilotes (Semaines 7-8)
 * [ ] Tests de charge et audit de cloisonnement strict entre tenants.
 * [ ] Déploiement chez les 3 premiers clients pilotes (Zone Francophone 50+ salariés).
+---
+
+## Mises à jour d'architecture (Contraintes terrain)
+
+* **Authentification hybride (SSO optionnel) :** Chaque entreprise choisit son mode (`sso` via Entra ID/Google ou `local_email` via domaine email professionnel + OTP/mot de passe géré par l'API Gateway).
+* **Cloisonnement strict à la demande (`use_shared_base`) :** Un client peut désactiver l'accès au socle documentaire commun A.C.R. (`use_shared_base = FALSE`) directement depuis son espace Admin. Le verrou est appliqué nativement au niveau PostgreSQL (RLS).

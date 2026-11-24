@@ -5,3 +5,6 @@
 3. ZÉRO HALLUCINATION : Le moteur RAG doit obligatoirement citer le document source et sa version. En cas de score de confiance insuffisant, déclencher le flux `unanswered_flag = true` (remontée anonymisée vers l'Admin + escalade référent).
 4. TRAÇABILITÉ & RGPD : Tout document importé génère un hash SHA-256 et un horodatage. Les questions posées par les salariés sont strictement anonymisées dans `query_logs`.
 5. LANGUE : Code, noms de variables et tables SQL en anglais ; interface utilisateur, documentation et échanges en français (avec support `i18n` prévu).
+
+6. AUTHENTIFICATION HYBRIDE : Le SSO est optionnel (`tenants.auth_mode` = 'sso' ou 'local_email'). Toujours maintenir une connexion autonome par email professionnel / OTP / mot de passe pour les entreprises sans SSO.
+7. OPT-OUT SOCLE COMMUN : Respecter strictement `tenants.use_shared_base`. Si FALSE, le RAG ne doit interroger QUE les documents privés du client (`tenant_id`), jamais le socle mutualisé (`is_shared_base = true`).
