@@ -16,7 +16,7 @@ app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'bob-api-gateway' });
-});
+ printf "\\pset pager off\n\\d query_logs\n" | scalingo -a bob-acr-api --region osc-fr1 pgsql-console});
 
 app.get('/health/db', async (req, res) => {
   try {
