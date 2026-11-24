@@ -39,7 +39,7 @@ app.use('/api', statusRoute);
 app.use('/api', tenantAuth, queryRoute);
 app.use('/api', tenantAuth, documentsRoute);
 app.use('/api', tenantAuth, acknowledgmentsRoute);
-app.use('/api', tenantAuth, adminRoute);
+app.use('/api', tenantAuth, tenantAuth.requireAdminRole, adminRoute);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
