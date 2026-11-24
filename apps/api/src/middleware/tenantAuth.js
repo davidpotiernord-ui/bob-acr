@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { pool } from '../services/db.js';
+import db from '../services/db.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,7 +24,7 @@ export async function tenantAuth(req, res, next) {
 
     if (rawKey) {
       const keyHash = sha256(rawKey);
-      const { rows } = await pool.query(
+      const { rows } = await db.pool.query(
         `SELECT k.id, k.tenant_id, k.role, t.name AS tenant_name
          FROM tenant_api_keys k
          JOIN tenants t ON t.id = k.tenant_id
@@ -41,7 +41,7 @@ export async function tenantAuth(req, res, next) {
       req.tenantName = rows[0].tenant_name;
       req.apiKeyRole = rows[0].role;
 
-      pool.query('UPDATE tenant_api_keys SET last_used_at = NOW() WHERE id = $1', [rows[0].id]).catch(() => {});
+      db.pool.query('UPDATE tenant_api_keys SET last_used_at = NOW() WHERE id = $1', [rows[0].id]).catch(() => {});
       return next();
     }
 
