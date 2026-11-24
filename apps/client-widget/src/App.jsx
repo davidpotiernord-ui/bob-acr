@@ -110,6 +110,7 @@ export default function App() {
           status: 'signed',
           at: new Date(res.proof?.acknowledged_at || Date.now()).toLocaleTimeString('fr-FR'),
           docTitle: res.proof?.document_title || 'Document',
+          sha256: res.proof?.sha256_hash || '',
         },
       }));
     } catch {
@@ -151,7 +152,7 @@ export default function App() {
 
       <div className="flex-1 overflow-y-auto p-3.5 space-y-3 bg-slate-50">
         {messages.map((msg, idx) => {
-          const primaryDocId = msg.sources?.[0]?.documentId;
+          const primaryDocId = msg.sources?.[0]?.documentId || msg.sources?.[0]?.document_id || msg.sources?.[0]?.id;
           const currentAck = primaryDocId ? ackState[primaryDocId] : null;
 
           return (
@@ -198,7 +199,7 @@ export default function App() {
                         {typeof currentAck === 'object' && currentAck.status === 'signed' ? (
                           <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
                             <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                            <span>Émargé à {currentAck.at} ({currentAck.docTitle})</span>
+                            <span>Émargé à {currentAck.at} ({currentAck.docTitle}){currentAck.sha256 ? ` • SHA-256 ${currentAck.sha256.slice(0, 12)}…` : ""}</span>
                           </div>
                         ) : (
                           <button
