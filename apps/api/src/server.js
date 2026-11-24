@@ -6,11 +6,12 @@ const db = require('./services/db');
 const statusRoute = require('./routes/status');
 const tenantAuth = require('./middleware/tenantAuth');
 const queryRoute = require('./routes/query');
+const documentsRoute = require('./routes/documents');
 
 const app = express();
 app.use(helmet());
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'bob-api-gateway' });
@@ -34,6 +35,7 @@ app.get('/health/db', async (req, res) => {
 
 app.use('/api', statusRoute);
 app.use('/api', tenantAuth, queryRoute);
+app.use('/api', tenantAuth, documentsRoute);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
