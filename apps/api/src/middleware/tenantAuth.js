@@ -1,5 +1,5 @@
-import crypto from 'crypto';
-import db from '../services/db.js';
+const crypto = require('crypto');
+const db = require('../services/db');
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -18,7 +18,7 @@ function extractApiKey(req) {
   return null;
 }
 
-export async function tenantAuth(req, res, next) {
+async function tenantAuth(req, res, next) {
   try {
     const rawKey = extractApiKey(req);
 
@@ -61,9 +61,14 @@ export async function tenantAuth(req, res, next) {
   }
 }
 
-export function requireAdminRole(req, res, next) {
+function requireAdminRole(req, res, next) {
   if (req.apiKeyRole !== 'admin') {
     return res.status(403).json({ error: 'Droits administrateur requis pour cette action' });
   }
   return next();
 }
+
+tenantAuth.tenantAuth = tenantAuth;
+tenantAuth.requireAdminRole = requireAdminRole;
+
+module.exports = tenantAuth;
