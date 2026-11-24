@@ -35,7 +35,7 @@ async function tenantAuth(req, res, next) {
     if (rawKey) {
       const keyHash = sha256(rawKey);
       const { rows } = await runQuery(
-        `SELECT k.id, k.tenant_id, k.role
+        `SELECT k.id, k.tenant_id, k.role, t.name AS tenant_name
          FROM tenant_api_keys k
          JOIN tenants t ON t.id = k.tenant_id
          WHERE k.key_hash = $1 AND k.revoked_at IS NULL
@@ -48,7 +48,8 @@ async function tenantAuth(req, res, next) {
       }
 
       req.tenantId = rows[0].tenant_id;
-      req.tenant = { id: rows[0].tenant_id };
+      req.tenant = { id: rows[0].tenant_id, name: rows[0].tenant_name };
+      req.tenantName = rows[0].tenant_name;
       req.apiKeyRole = rows[0].role;
 
       runQuery('UPDATE tenant_api_keys SET last_used_at = NOW() WHERE id = $1', [rows[0].id]).catch(() => {});
