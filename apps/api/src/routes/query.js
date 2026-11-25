@@ -22,6 +22,21 @@ function formatContextSummary(context) {
   return parts.length > 0 ? `\nContexte d'utilisation : ${parts.join(' | ')}` : '';
 }
 
+function answerIndicatesMissingDocInfo(answerText) {
+  if (!answerText || typeof answerText !== 'string') return false;
+  const normalized = answerText
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  return (
+    normalized.includes('aucun extrait fourni ne traite') ||
+    normalized.includes("je n'ai pas la confirmation dans les documents") ||
+    normalized.includes("je n ai pas la confirmation dans les documents") ||
+    normalized.includes('escalader vers le referent')
+  );
+}
+
 router.post('/query', async (req, res) => {
   const client = await db.pool.connect();
   try {
@@ -80,7 +95,7 @@ router.post('/query', async (req, res) => {
     const confidenceScore = bestChunk
       ? Math.max(0, Math.min(1, Number(Number(bestChunk.similarity).toFixed(3))))
       : 0;
-    const hasContext = topChunks.length > 0 && confidenceScore >= 0.35;
+    const hasContext = topChunks.length > 0 && confidenceScore >= 0.78;
 
     const contextBlock = topChunks
       .map(
@@ -105,7 +120,7 @@ Si l'information n'est pas suffisamment étayée par les extraits, indique clair
       userPrompt,
     });
 
-    const unansweredFlag = !hasContext;
+    const unansweredFlag = !hasContext || answerIndicatesMissingDocInfo(answer);
     const wasEscalated = unansweredFlag;
     const escalatedToRole = wasEscalated ? 'compliance_referent' : null;
     const citedDocumentId = bestChunk ? bestChunk.document_id : null;
