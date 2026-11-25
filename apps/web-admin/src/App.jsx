@@ -183,6 +183,32 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
+  const handleExportPdf = () => {
+  const win = window.open("", "_blank", "width=900,height=700");
+  if (!win) {
+    setErrorMsg("Fenêtre pop-up bloquée : autorisez les pop-ups pour localhost:5173 afin de générer le PDF.");
+    return;
+  }
+  const dateStr = new Date().toLocaleString("fr-FR");
+  const docRows = (documents || []).map((d) =>
+    `<tr><td>${d.module_code || ""}</td><td>${d.title || ""}</td><td>${d.version || ""}</td><td><code>${d.sha256_hash || ""}</code></td></tr>`
+  ).join("");
+  const ackRows = (acknowledgments || []).map((a) =>
+    `<tr><td>${a.acknowledged_at || ""}</td><td>${a.user_email || a.full_name || "Référent Conformité"}</td><td>${a.document_title || ""}</td><td><code>${a.sha256_hash || ""}</code></td></tr>`
+  ).join("");
+
+  win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Preuve Art. R. 1321-1 — BOB</title>
+  <style>body{font-family:system-ui,sans-serif;padding:24px;color:#0f172a}h1{font-size:18px;margin-bottom:4px}p.meta{font-size:12px;color:#475569;margin-top:0}table{width:100%;border-collapse:collapse;margin:14px 0;font-size:11px}th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;word-break:break-all}th{background:#f1f5f9}</style></head><body>
+  <h1>Dossier de preuve réglementaire — Code du travail Art. R. 1321-1</h1>
+  <p class="meta">Atelier Métal &amp; Industrie du Sud SAS • Généré le ${dateStr}</p>
+  <h2>Documents &amp; empreintes SHA-256 (${(documents || []).length})</h2>
+  <table><thead><tr><th>Module</th><th>Titre</th><th>Version</th><th>SHA-256</th></tr></thead><tbody>${docRows}</tbody></table>
+  <h2>Émargements enregistrés (${(acknowledgments || []).length})</h2>
+  <table><thead><tr><th>Horodatage</th><th>Signataire / Rôle</th><th>Document / Question</th><th>SHA-256</th></tr></thead><tbody>${ackRows}</tbody></table>
+  <script>window.onload=()=>setTimeout(()=>window.print(),200);</script></body></html>`);
+  win.document.close();
+};
+
   const handleExportProof = () => {
     const payload = {
       exported_at: new Date().toISOString(),
@@ -299,6 +325,13 @@ export default function App() {
           >
             <Download className="w-4 h-4" />
             Export preuve (Art. R. 1321-1)
+          </button>
+          <button
+            type="button"
+            onClick={() => { try { handleExportPdf(); } catch (e) { setErrorMsg(`Erreur PDF : ${e.message}`); } }}
+            className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 border border-slate-700"
+          >
+            Export PDF
           </button>
         </div>
       </header>
