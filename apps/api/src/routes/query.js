@@ -92,7 +92,17 @@ function answerIndicatesMissingDocInfo(answerText) {
     normalized.includes("n ai pas la confirmation") ||
     normalized.includes("n'ai pas trouve d'extrait") ||
     normalized.includes("n ai pas trouve d extrait") ||
-    (normalized.includes("escalader") && normalized.includes("referent"))
+    (normalized.includes("escalader") && normalized.includes("referent")) ||
+    normalized.includes("aucune procedure") ||
+    normalized.includes("n'est mentionnee") ||
+    normalized.includes("n est mentionnee") ||
+    normalized.includes("n'est pas confirmee") ||
+    normalized.includes("n est pas confirmee") ||
+    normalized.includes("n'est pas confirme") ||
+    normalized.includes("n est pas confirme") ||
+    normalized.includes("pas confirmee dans les extraits") ||
+    normalized.includes("non precise dans les extraits") ||
+    normalized.includes("non mentionne dans les extraits")
   );
 }
 
