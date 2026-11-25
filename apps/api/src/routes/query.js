@@ -31,10 +31,11 @@ function answerIndicatesMissingDocInfo(answerText) {
 
   return (
     normalized.includes("aucun extrait") ||
-    normalized.includes("aucune confirmation disponible") ||
-    normalized.includes("ne contiennent aucune information") ||
-    normalized.includes("n'ai pas la confirmation dans les documents") ||
-    normalized.includes("n ai pas la confirmation dans les documents") ||
+    normalized.includes("aucune information") ||
+    normalized.includes("aucune confirmation") ||
+    normalized.includes("escalade requise") ||
+    normalized.includes("n'ai pas la confirmation") ||
+    normalized.includes("n ai pas la confirmation") ||
     (normalized.includes("escalader") && normalized.includes("referent"))
   );
 }
