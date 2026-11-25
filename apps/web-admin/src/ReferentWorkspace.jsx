@@ -345,7 +345,7 @@ export function ScopeToolbar({ gov }) {
           })}
         </select>
         <span className="px-2 py-0.5 rounded bg-indigo-900/90 border border-indigo-700/70 text-[11px] text-indigo-200">
-          {gov.roleMeta.canWrite ? 'Lecture et écriture' : 'Lecture seule'}
+          {gov.roleMeta.canWrite ? 'Lecture et écriture (ou Push)' : 'Lecture seule'}
         </span>
       </div>
 
@@ -578,6 +578,7 @@ export function ReferentTabContent({
                 className="bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-900"
               >
                 <option value="read_write">Autorisé en lecture et écriture</option>
+            <option value="read_write_push">Lecture, écriture + Push autorisé</option>
                 <option value="read_only">Autorisé en lecture seule</option>
               </select>
             </div>
@@ -674,7 +675,8 @@ export function ReferentTabContent({
                       onChange={(e) => gov.updateReferentAccess(ref.id, e.target.value)}
                       className="bg-white border border-slate-200 rounded-md px-2 py-1 text-[11px] font-medium"
                     >
-                      <option value="read_write">Lecture et écriture</option>
+                      <option value="read_write">Lecture et écriture (ou Push)</option>
+            <option value="read_write_push">Lecture, écriture + Push autorisé</option>
                       <option value="read_only">Lecture seule</option>
                     </select>
                     {gov.roleMeta.canWrite && gov.referents.length > 1 && (

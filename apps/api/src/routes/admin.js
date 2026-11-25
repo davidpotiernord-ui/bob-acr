@@ -33,12 +33,14 @@ function ensureAdminSchema() {
           full_name TEXT NOT NULL,
           email TEXT NOT NULL,
           role VARCHAR(40) NOT NULL DEFAULT 'referent_metier',
-          access_level VARCHAR(20) NOT NULL DEFAULT 'read_write',
+          access_level VARCHAR(25) NOT NULL DEFAULT 'read_write',
           scopes TEXT[] NOT NULL DEFAULT ARRAY['socle_ri']::TEXT[],
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
+        ALTER TABLE tenant_referents ADD COLUMN IF NOT EXISTS access_token VARCHAR(96);
+        UPDATE tenant_referents SET access_token = encode(gen_random_bytes(24), 'hex') WHERE access_token IS NULL;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_referents_tenant_email
           ON tenant_referents (tenant_id, LOWER(email));
       `)
@@ -64,6 +66,7 @@ function mapReferentRow(row) {
     role: row.role,
     accessLevel: row.access_level,
     scopes: Array.isArray(row.scopes) && row.scopes.length > 0 ? row.scopes : ["socle_ri"],
+    accessToken: row.access_token || null,
     createdAt: row.created_at,
   };
 }
@@ -300,7 +303,7 @@ router.get("/admin/referents", async (req, res) => {
     ]);
 
     let result = await client.query(
-      `SELECT id, full_name, email, role, access_level, scopes, created_at
+      `SELECT id, full_name, email, role, access_level, scopes, access_token, created_at
        FROM tenant_referents
        WHERE tenant_id = $1
        ORDER BY created_at ASC`,
@@ -309,7 +312,7 @@ router.get("/admin/referents", async (req, res) => {
 
     if (result.rowCount === 0) {
       await client.query(
-        `INSERT INTO tenant_referents (tenant_id, full_name, email, role, access_level, scopes)
+        `INSERT INTO tenant_referents (tenant_id, full_name, email, role, access_level, scopes, access_token)
          VALUES
            ($1, 'Direction Conformité', 'conformite@atelier-metal.fr', 'admin_conformite', 'read_write', ARRAY['socle_ri','rgpd','cyber','sapin_ii','lcb_ft']::TEXT[]),
            ($1, 'Claire Moreau', 'claire.moreau@atelier-metal.fr', 'referent_metier', 'read_write', ARRAY['socle_ri','cyber']::TEXT[]),
@@ -319,7 +322,7 @@ router.get("/admin/referents", async (req, res) => {
       );
 
       result = await client.query(
-        `SELECT id, full_name, email, role, access_level, scopes, created_at
+        `SELECT id, full_name, email, role, access_level, scopes, access_token, created_at
          FROM tenant_referents
          WHERE tenant_id = $1
          ORDER BY created_at ASC`,
@@ -359,7 +362,7 @@ router.post("/admin/referents", requireAdminRole, async (req, res) => {
   const cleanRole = ["admin_conformite", "referent_metier", "auditeur_lecture"].includes(role)
     ? role
     : "referent_metier";
-  const cleanAccess = accessLevel === "read_only" ? "read_only" : "read_write";
+  const cleanAccess = ["read_only", "read_write", "read_write_push"].includes(accessLevel) ? accessLevel : "read_write";
   const cleanScopes =
     cleanRole === "admin_conformite" || cleanRole === "auditeur_lecture"
       ? ALLOWED_SCOPES
@@ -374,7 +377,7 @@ router.post("/admin/referents", requireAdminRole, async (req, res) => {
 
     const insertRes = await client.query(
       `INSERT INTO tenant_referents (tenant_id, full_name, email, role, access_level, scopes)
-       VALUES ($1, $2, $3, $4, $5, $6)
+       VALUES ($1, $2, $3, $4, $5, $6, encode(gen_random_bytes(24), 'hex'))
        ON CONFLICT (tenant_id, LOWER(email))
        DO UPDATE SET
          full_name = EXCLUDED.full_name,
@@ -382,7 +385,7 @@ router.post("/admin/referents", requireAdminRole, async (req, res) => {
          access_level = EXCLUDED.access_level,
          scopes = EXCLUDED.scopes,
          updated_at = NOW()
-       RETURNING id, full_name, email, role, access_level, scopes, created_at`,
+       RETURNING id, full_name, email, role, access_level, scopes, access_token, created_at`,
       [req.tenant.id, name.trim(), email.trim().toLowerCase(), cleanRole, cleanAccess, cleanScopes]
     );
 
@@ -451,7 +454,7 @@ router.patch("/admin/referents/:referentId", requireAdminRole, async (req, res) 
 
     const current = currentRes.rows[0];
     const nextAccess =
-      accessLevel === "read_only" || accessLevel === "read_write"
+      ["read_only", "read_write", "read_write_push"].includes(accessLevel)
         ? accessLevel
         : current.access_level;
     const nextScopes = Array.isArray(scopes) ? sanitizeScopes(scopes) : current.scopes;
@@ -462,7 +465,7 @@ router.patch("/admin/referents/:referentId", requireAdminRole, async (req, res) 
            scopes = $2,
            updated_at = NOW()
        WHERE id = $3 AND tenant_id = $4
-       RETURNING id, full_name, email, role, access_level, scopes, created_at`,
+       RETURNING id, full_name, email, role, access_level, scopes, access_token, created_at`,
       [nextAccess, nextScopes, referentId, req.tenant.id]
     );
 

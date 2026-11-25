@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import DedicatedReferentPortal from "./DedicatedReferentPortal";
 import {
   ShieldCheck,
   FileText,
@@ -35,6 +36,8 @@ function getAuthHeaders(extra = {}) {
 }
 
 export default function App() {
+  const referentToken = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("referent_token") : null;
+  if (referentToken) return <DedicatedReferentPortal token={referentToken} apiBase={API_BASE} />;
   const [tab, setTab] = useState('referent');
   const [useSharedBase, setUseSharedBase] = useState(true);
   const [authMode, setAuthMode] = useState('sso');

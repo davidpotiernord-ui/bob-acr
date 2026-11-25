@@ -96,3 +96,22 @@ export async function acknowledgeDocument({ documentId, userEmail }) {
     user_email: userEmail || defaultEmail,
   });
 }
+
+export async function fetchPendingPushes() {
+  const { baseUrl, headers, userEmail } = await resolveAuthHeaders();
+  const res = await fetch(`${baseUrl}/api/widget/pushes/pending?user=${encodeURIComponent(userEmail)}`, { headers });
+  if (!res.ok) return { unreadCount: 0, pushes: [] };
+  return res.json();
+}
+
+export async function respondToPush(pushId, { selectedOption = null, freeText = null } = {}) {
+  const { baseUrl, headers, userEmail } = await resolveAuthHeaders();
+  const res = await fetch(`${baseUrl}/api/widget/pushes/${pushId}/respond`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ userIdentifier: userEmail, selectedOption, freeText }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || 'Erreur envoi réponse');
+  return data;
+}

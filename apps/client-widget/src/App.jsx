@@ -18,6 +18,8 @@ import {
   saveTrackedEscalation,
   fetchEscalationsStatus,
   acknowledgeEscalationAnswer,
+  fetchPendingPushes,
+  respondToPush,
 } from './services/askClient';
 
 const QUICK_QUESTIONS = [
@@ -68,6 +70,9 @@ export default function App() {
   const [trackedItems, setTrackedItems] = useState([]);
   const [syncingInbox, setSyncingInbox] = useState(false);
   const [refAckLoading, setRefAckLoading] = useState({});
+  const [pendingPushes, setPendingPushes] = useState([]);
+  const [pushFeedback, setPushFeedback] = useState("");
+  const [pushBusy, setPushBusy] = useState(false);
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
@@ -100,8 +105,38 @@ export default function App() {
     }
   };
 
+  const syncPendingPushes = async () => {
+    try {
+      const res = await fetchPendingPushes();
+      const list = Array.isArray(res.pushes) ? res.pushes : [];
+      setPendingPushes(list);
+      if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
+        chrome.action.setBadgeText({ text: list.length > 0 ? String(list.length) : "" }).catch(() => {});
+      }
+    } catch {}
+  };
+
+  const handlePushAction = async (push, selectedOption) => {
+    setPushBusy(true);
+    setPushFeedback("");
+    try {
+      const out = await respondToPush(push.id, { selectedOption });
+      if (push.push_type === "quiz" && out.response?.is_correct === false) {
+        setPushFeedback("Réponse enregistrée. Attendu : " + (out.correctOption || "voir référent"));
+      } else {
+        setPushFeedback(push.push_type === "quiz" ? "Réponse enregistrée et horodatée." : "Émargement enregistré avec preuve.");
+      }
+      await syncPendingPushes();
+    } catch (e) {
+      setPushFeedback(e.message || "Erreur envoi");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
   useEffect(() => {
     syncTrackedStatuses();
+    syncPendingPushes();
 
     const formatSourceDomain = (rawUrl) => {
       if (!rawUrl) return "";
@@ -346,6 +381,26 @@ export default function App() {
         </div>
       </header>
 
+      {pendingPushes.length > 0 && (
+  <div className="mx-3.5 mt-3 p-3 rounded-xl bg-indigo-50 border border-indigo-200 space-y-2">
+    <div className="flex items-center justify-between text-[11px] font-semibold text-indigo-700">
+      <span>{pendingPushes[0].push_type === "quiz" ? "MICRO-SONDAGE RÉFÉRENT" : "MISE À JOUR À ÉMARGER"}</span>
+      <span>{pendingPushes.length} en attente</span>
+    </div>
+    <p className="text-xs font-bold text-slate-900">{pendingPushes[0].title}</p>
+    <p className="text-xs text-slate-700">{pendingPushes[0].body}</p>
+    {pendingPushes[0].push_type === "quiz" && Array.isArray(pendingPushes[0].options_json) && pendingPushes[0].options_json.length > 0 ? (
+      <div className="flex flex-col gap-1.5 pt-1">
+        {pendingPushes[0].options_json.map((opt, idx) => (
+          <button key={idx} type="button" disabled={pushBusy} onClick={() => handlePushAction(pendingPushes[0], opt)} className="text-left text-xs px-2.5 py-1.5 rounded-lg bg-white border border-indigo-200 hover:bg-indigo-100 text-slate-800">{opt}</button>
+        ))}
+      </div>
+    ) : (
+      <button type="button" disabled={pushBusy} onClick={() => handlePushAction(pendingPushes[0], "ACK")} className="w-full text-xs font-semibold py-1.5 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white">J'ai lu et j'émarge</button>
+    )}
+    {pushFeedback && <p className="text-[11px] font-medium text-emerald-700">{pushFeedback}</p>}
+  </div>
+)}
       {view === 'inbox' ? (
         <div className="flex-1 overflow-y-auto p-3.5 space-y-3 bg-slate-50">
           <div className="flex items-center justify-between">

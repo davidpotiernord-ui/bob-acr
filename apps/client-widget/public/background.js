@@ -75,3 +75,35 @@ chrome.action.onClicked.addListener(async (tab) => {
     await chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
   }
 });
+
+const BOB_DEFAULT_API = "https://bob-acr-api.osc-fr1.scalingo.io";
+
+async function refreshBobPushBadge() {
+  try {
+    const cfg = await new Promise((resolve) => {
+      if (chrome.storage?.managed) {
+        chrome.storage.managed.get(["api_key", "api_url", "user_email"], (items) => resolve(items || {}));
+      } else resolve({});
+    });
+    const baseUrl = (cfg.api_url || BOB_DEFAULT_API).replace(/\/+$/, "");
+    const userEmail = cfg.user_email || "salarie.demo@atelier-sud.fr";
+    const headers = cfg.api_key ? { Authorization: `Bearer ${cfg.api_key}` } : {};
+    const res = await fetch(`${baseUrl}/api/widget/pushes/pending?user=${encodeURIComponent(userEmail)}`, { headers });
+    if (!res.ok) return;
+    const data = await res.json();
+    const count = Number(data.unreadCount || (data.pushes ? data.pushes.length : 0));
+    if (chrome.action?.setBadgeText) {
+      await chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
+      if (count > 0 && chrome.action.setBadgeBackgroundColor) {
+        await chrome.action.setBadgeBackgroundColor({ color: "#e11d48" });
+      }
+    }
+  } catch {}
+}
+
+chrome.alarms?.create("bob-poll-pushes", { periodInMinutes: 1 });
+chrome.alarms?.onAlarm.addListener((alarm) => {
+  if (alarm.name === "bob-poll-pushes") refreshBobPushBadge();
+});
+chrome.runtime.onInstalled.addListener(() => refreshBobPushBadge());
+chrome.runtime.onStartup?.addListener(() => refreshBobPushBadge());
