@@ -37,6 +37,8 @@ export default function App() {
   const [documents, setDocuments] = useState([]);
   const [acknowledgments, setAcknowledgments] = useState([]);
   const [escalations, setEscalations] = useState([]);
+  const [replyDrafts, setReplyDrafts] = useState({});
+  const [replySaving, setReplySaving] = useState({});
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [adminKeyInput, setAdminKeyInput] = useState(() =>
@@ -177,6 +179,27 @@ export default function App() {
     setTimeout(() => setExported(false), 3500);
   };
 
+    const handleReplyEscalation = async (queryId) => {
+    const answerText = (replyDrafts[queryId] || '').trim();
+    if (!answerText || replySaving[queryId]) return;
+    setReplySaving((prev) => ({ ...prev, [queryId]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/admin/escalations/${queryId}/reply`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: answerText }),
+      });
+      const data = await res.json();
+      if (res.ok && data.escalation) {
+        setEscalations((prev) =>
+          prev.map((item) => (item.id === queryId ? { ...item, ...data.escalation } : item))
+        );
+        setReplyDrafts((prev) => ({ ...prev, [queryId]: '' }));
+      }
+    } finally {
+      setReplySaving((prev) => ({ ...prev, [queryId]: false }));
+    }
+  };
   return (
     <>
       <div className="bg-slate-900 text-slate-100 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2 border-b border-slate-800">
@@ -450,19 +473,59 @@ export default function App() {
             {escalations.map((esc) => (
               <div
                 key={esc.id}
-                className="bg-white rounded-xl border border-slate-200 p-5 space-y-1.5 shadow-sm"
+                className="bg-white rounded-xl border border-slate-200 p-5 space-y-2.5 shadow-sm"
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full">
-                    Escalade → {esc.escalated_to_role || 'referent'}
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold uppercase text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full">
+                      Réf. #${esc.id.slice(0, 8).toUpperCase()} • ${esc.was_escalated ? 'Transmise au référent' : 'Hors périmètre'}
+                    </span>
+                    {esc.referent_acknowledged_at && (
+                      <span className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                        Émargé le ${new Date(esc.referent_acknowledged_at).toLocaleString('fr-FR')}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-slate-500">
-                    Canal : {esc.channel} • Confiance : {esc.confidence_score ?? '0.000'} •{' '}
-                    {new Date(esc.created_at).toLocaleString('fr-FR')}
+                    Canal : ${esc.channel} • Confiance : ${esc.confidence_score ?? '0.000'} • ${new Date(esc.created_at).toLocaleString('fr-FR')}
                   </span>
                 </div>
                 <p className="text-sm font-medium text-slate-900">« {esc.question_topic} »</p>
                 <p className="text-xs text-slate-500">Module : {esc.module_code || 'non classé'}</p>
+                {esc.referent_answer ? (
+                  <div className="mt-2 rounded-lg bg-emerald-50/70 border border-emerald-200 p-3 space-y-1">
+                    <div className="flex items-center justify-between text-xs font-medium text-emerald-900">
+                      <span>Réponse officielle publiée ({esc.answered_by_role || 'Référent Conformité'})</span>
+                      {esc.answered_at && <span>{new Date(esc.answered_at).toLocaleString('fr-FR')}</span>}
+                    </div>
+                    <p className="text-sm text-slate-800 whitespace-pre-line">{esc.referent_answer}</p>
+                    {esc.referent_answer_sha256 && (
+                      <p className="text-[11px] text-slate-500">
+                        SHA-256 : <code className="bg-white px-1 py-0.5 rounded border border-slate-200">{esc.referent_answer_sha256}</code>
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="pt-2 border-t border-slate-100 space-y-2">
+                    <textarea
+                      rows={2}
+                      value={replyDrafts[esc.id] || ''}
+                      onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [esc.id]: e.target.value }))}
+                      placeholder="Rédiger la réponse officielle du référent conformité..."
+                      className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleReplyEscalation(esc.id)}
+                        disabled={replySaving[esc.id] || !(replyDrafts[esc.id] || '').trim()}
+                        className="text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white px-3.5 py-1.5 rounded-lg transition"
+                      >
+                        {replySaving[esc.id] ? 'Publication...' : 'Publier la réponse anonyme'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
