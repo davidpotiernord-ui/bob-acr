@@ -61,6 +61,7 @@ export default function App() {
   const [view, setView] = useState('chat');
   const [channel, setChannel] = useState('chrome_extension');
   const [question, setQuestion] = useState('');
+  const [selectedExcerpt, setSelectedExcerpt] = useState(null);
   const [loading, setLoading] = useState(false);
   const [ackState, setAckState] = useState({});
   const [escalateState, setEscalateState] = useState({});
@@ -102,6 +103,24 @@ export default function App() {
   useEffect(() => {
     syncTrackedStatuses();
 
+    const formatSourceDomain = (rawUrl) => {
+      if (!rawUrl) return "";
+      try {
+        return new URL(rawUrl).hostname.replace(/^www\./, "");
+      } catch {
+        return "";
+      }
+    };
+
+    const loadExcerpt = (pending) => {
+      if (!pending?.text) return;
+      setView("chat");
+      setSelectedExcerpt({
+        text: pending.text.trim(),
+        domain: formatSourceDomain(pending.pageUrl),
+      });
+    };
+
     const applyPendingSelection = async () => {
       try {
         if (!window.chrome?.storage?.local) return;
@@ -110,8 +129,7 @@ export default function App() {
         if (pending && pending.text) {
           const isRecent = Date.now() - (pending.capturedAt || 0) < 5 * 60 * 1000;
           if (isRecent) {
-            setView("chat");
-            setQuestion(`Vérifie la conformité de cet extrait : « ${pending.text} »`);
+            loadExcerpt(pending);
           }
           await chrome.storage.local.remove("bobPendingSelection");
         }
@@ -124,17 +142,29 @@ export default function App() {
 
     const onStorageChanged = (changes, areaName) => {
       if (areaName === "local" && changes.bobPendingSelection?.newValue?.text) {
-        const pending = changes.bobPendingSelection.newValue;
-        setView("chat");
-        setQuestion(`Vérifie la conformité de cet extrait : « ${pending.text} »`);
+        loadExcerpt(changes.bobPendingSelection.newValue);
         chrome.storage.local.remove("bobPendingSelection").catch(() => {});
       }
     };
 
+    const onWindowMessage = (event) => {
+      if (event.data?.type === "BOB_SELECTION_PAYLOAD" && event.data?.payload?.text) {
+        loadExcerpt(event.data.payload);
+        window.chrome?.storage?.local?.remove("bobPendingSelection").catch(() => {});
+      }
+    };
+    window.addEventListener("message", onWindowMessage);
+
     if (window.chrome?.storage?.onChanged) {
       chrome.storage.onChanged.addListener(onStorageChanged);
-      return () => chrome.storage.onChanged.removeListener(onStorageChanged);
     }
+
+    return () => {
+      window.removeEventListener("message", onWindowMessage);
+      if (window.chrome?.storage?.onChanged) {
+        chrome.storage.onChanged.removeListener(onStorageChanged);
+      }
+    };
   }, []);
 
   const unreadAnswersCount = trackedItems.filter(
@@ -142,11 +172,20 @@ export default function App() {
   ).length;
 
   const handleSend = async (textToSend) => {
-    const cleanText = (textToSend ?? question).trim();
-    if (!cleanText || loading) return;
+    const basePrompt = (textToSend ?? question).trim();
+    const excerpt = selectedExcerpt?.text?.trim() || "";
+    if (!basePrompt && !excerpt) return;
+    if (loading) return;
+
+    const promptInstruction = basePrompt || "Vérifie la conformité de cet extrait au regard des règles applicables.";
+    const cleanText = excerpt
+      ? `${promptInstruction}\n\nExtrait analysé : « ${excerpt} »`
+      : promptInstruction;
+
     setView('chat');
     setMessages((prev) => [...prev, { role: 'user', text: cleanText }]);
     setQuestion('');
+    setSelectedExcerpt(null);
     setLoading(true);
     try {
       const response = await askBob({ question: cleanText, channel });
@@ -246,7 +285,7 @@ export default function App() {
 
   return (
     <div className="h-screen w-full bg-white overflow-hidden flex flex-col">
-      <header className="bg-slate-900 text-white px-3.5 py-2.5 flex items-center justify-between gap-2 shrink-0">
+      <header className="bg-slate-900 text-white pl-3.5 pr-10 py-2.5 flex items-center justify-between gap-2 shrink-0">
         <div className="min-w-0">
           <h1 className="font-semibold text-sm truncate">BOB — Conformité & Règlement</h1>
           <p className="text-[11px] text-slate-400 truncate">Réponses sourcées • Confidentialité préservée</p>
@@ -519,6 +558,45 @@ export default function App() {
             )}
           </div>
 
+          {selectedExcerpt && (
+            <div className="px-3 py-2.5 bg-indigo-50 border-t border-indigo-200 space-y-2 shrink-0">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold text-indigo-900">
+                    Extrait sélectionné {selectedExcerpt.domain ? `(${selectedExcerpt.domain})` : ""}
+                  </p>
+                  <p className="text-xs text-slate-700 italic line-clamp-2 mt-0.5">
+                    « {selectedExcerpt.text} »
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedExcerpt(null)}
+                  className="text-xs text-slate-500 hover:text-slate-800 px-1.5 py-0.5 rounded"
+                  title="Retirer l extrait"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  "Est-ce conforme au règlement intérieur ?",
+                  "Y a-t-il un risque RGPD ou confidentialité ?",
+                  "Quelle règle s applique ici ?",
+                ].map((preset, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSend(preset)}
+                    className="text-[11px] font-medium bg-white hover:bg-indigo-100 text-indigo-800 border border-indigo-200 px-2 py-1 rounded-lg transition"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="px-3 py-2 bg-white border-t border-slate-100 flex gap-1.5 overflow-x-auto shrink-0">
             {QUICK_QUESTIONS.map((q, i) => (
               <button
@@ -542,12 +620,12 @@ export default function App() {
               type="text"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              placeholder="Posez votre question réglementaire..."
+              placeholder={selectedExcerpt ? "Précisez votre question ou cliquez sur Envoyer..." : "Posez votre question réglementaire..."}
               className="flex-1 text-sm bg-slate-100 border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             <button
               type="submit"
-              disabled={loading || !question.trim()}
+              disabled={loading || (!question.trim() && !selectedExcerpt)}
               className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white p-2.5 rounded-xl transition"
               aria-label="Envoyer la question"
             >
