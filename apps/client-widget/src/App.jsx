@@ -101,6 +101,40 @@ export default function App() {
 
   useEffect(() => {
     syncTrackedStatuses();
+
+    const applyPendingSelection = async () => {
+      try {
+        if (!window.chrome?.storage?.local) return;
+        const data = await chrome.storage.local.get("bobPendingSelection");
+        const pending = data?.bobPendingSelection;
+        if (pending && pending.text) {
+          const isRecent = Date.now() - (pending.capturedAt || 0) < 5 * 60 * 1000;
+          if (isRecent) {
+            setView("chat");
+            setQuestion(`Vérifie la conformité de cet extrait : « ${pending.text} »`);
+          }
+          await chrome.storage.local.remove("bobPendingSelection");
+        }
+      } catch {
+        // Ignore hors contexte extension
+      }
+    };
+
+    applyPendingSelection();
+
+    const onStorageChanged = (changes, areaName) => {
+      if (areaName === "local" && changes.bobPendingSelection?.newValue?.text) {
+        const pending = changes.bobPendingSelection.newValue;
+        setView("chat");
+        setQuestion(`Vérifie la conformité de cet extrait : « ${pending.text} »`);
+        chrome.storage.local.remove("bobPendingSelection").catch(() => {});
+      }
+    };
+
+    if (window.chrome?.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(onStorageChanged);
+      return () => chrome.storage.onChanged.removeListener(onStorageChanged);
+    }
   }, []);
 
   const unreadAnswersCount = trackedItems.filter(

@@ -3,8 +3,16 @@
   "name": "BOB — Assistant Conformité & Réglementation",
   "version": "0.1.0",
   "description": "Assistant interne de conformité et règlement intérieur (Atelier Métal & Industrie du Sud SAS)",
-  "permissions": ["sidePanel", "storage"],
-  "host_permissions": ["https://bob-acr-api.osc-fr1.scalingo.io/*"],
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "contextMenus",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://bob-acr-api.osc-fr1.scalingo.io/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -16,15 +24,24 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["index.html", "assets/*"],
-      "matches": ["<all_urls>"]
+      "resources": [
+        "index.html",
+        "assets/*"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
