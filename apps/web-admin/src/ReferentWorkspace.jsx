@@ -16,9 +16,30 @@ export const REFERENT_ROLES = [
 ];
 
 export const DEFAULT_REFERENTS = [
-  { id: 'ref-1', name: 'Claire Moreau', role: 'referent_metier', scopes: ['socle_ri', 'cyber'] },
-  { id: 'ref-2', name: 'Marc Lefèvre', role: 'referent_metier', scopes: ['rgpd', 'sapin_ii', 'lcb_ft'] },
-  { id: 'ref-3', name: 'Direction Conformité', role: 'admin_conformite', scopes: ['socle_ri', 'rgpd', 'cyber', 'sapin_ii', 'lcb_ft'] },
+  {
+    id: 'ref-1',
+    name: 'Claire Moreau',
+    email: 'claire.moreau@atelier-metal.fr',
+    role: 'referent_metier',
+    accessLevel: 'read_write',
+    scopes: ['socle_ri', 'cyber'],
+  },
+  {
+    id: 'ref-2',
+    name: 'Marc Lefèvre',
+    email: 'marc.lefevre@atelier-metal.fr',
+    role: 'referent_metier',
+    accessLevel: 'read_write',
+    scopes: ['rgpd', 'sapin_ii', 'lcb_ft'],
+  },
+  {
+    id: 'ref-3',
+    name: 'Direction Conformité',
+    email: 'conformite@atelier-metal.fr',
+    role: 'admin_conformite',
+    accessLevel: 'read_write',
+    scopes: ['socle_ri', 'rgpd', 'cyber', 'sapin_ii', 'lcb_ft'],
+  },
 ];
 
 export function getScopeLabel(code) {
@@ -41,8 +62,10 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
   const [activeReferentId, setActiveReferentId] = useState('ref-3');
   const [selectedScopeFilter, setSelectedScopeFilter] = useState('all');
   const [publishToKnowledgeBase, setPublishToKnowledgeBase] = useState({});
+
   const [newRefName, setNewRefName] = useState('');
-  const [newRefRole, setNewRefRole] = useState('referent_metier');
+  const [newRefEmail, setNewRefEmail] = useState('');
+  const [newRefAccess, setNewRefAccess] = useState('read_write');
   const [newRefScopes, setNewRefScopes] = useState(['socle_ri']);
 
   useEffect(() => {
@@ -55,6 +78,9 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
     referents.find((r) => r.id === activeReferentId) || referents[0] || DEFAULT_REFERENTS[2];
   const roleMeta =
     REFERENT_ROLES.find((r) => r.id === activeReferent.role) || REFERENT_ROLES[0];
+  const canWrite =
+    (activeReferent.accessLevel ? activeReferent.accessLevel === 'read_write' : roleMeta.canWrite) &&
+    roleMeta.canWrite;
   const allowedScopes = roleMeta.allScopes
     ? PERIMETERS.map((p) => p.code)
     : activeReferent.scopes || [];
@@ -93,23 +119,30 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
 
   const handleAddReferent = (e) => {
     e.preventDefault();
-    if (!newRefName.trim() || !roleMeta.canWrite) return;
+    if (!newRefName.trim() || !newRefEmail.trim() || !canWrite) return;
     const created = {
       id: `ref-${Date.now()}`,
       name: newRefName.trim(),
-      role: newRefRole,
-      scopes:
-        newRefRole === 'referent_metier' && newRefScopes.length
-          ? newRefScopes
-          : PERIMETERS.map((p) => p.code),
+      email: newRefEmail.trim(),
+      role: 'referent_metier',
+      accessLevel: newRefAccess,
+      scopes: newRefScopes.length ? newRefScopes : ['socle_ri'],
     };
     setReferents((prev) => [...prev, created]);
     setActiveReferentId(created.id);
     setNewRefName('');
+    setNewRefEmail('');
+  };
+
+  const updateReferentAccess = (refId, accessLevel) => {
+    if (!canWrite) return;
+    setReferents((prev) =>
+      prev.map((r) => (r.id === refId ? { ...r, accessLevel } : r))
+    );
   };
 
   const toggleReferentScope = (refId, scopeCode) => {
-    if (!roleMeta.canWrite) return;
+    if (!canWrite) return;
     setReferents((prev) =>
       prev.map((r) => {
         if (r.id !== refId) return r;
@@ -125,7 +158,7 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
     activeReferent,
     activeReferentId,
     setActiveReferentId,
-    roleMeta,
+    roleMeta: { ...roleMeta, canWrite },
     allowedScopes,
     selectedScopeFilter,
     setSelectedScopeFilter,
@@ -137,11 +170,14 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
     setPublishToKnowledgeBase,
     newRefName,
     setNewRefName,
-    newRefRole,
-    setNewRefRole,
+    newRefEmail,
+    setNewRefEmail,
+    newRefAccess,
+    setNewRefAccess,
     newRefScopes,
     setNewRefScopes,
     handleAddReferent,
+    updateReferentAccess,
     toggleReferentScope,
   };
 }
@@ -166,13 +202,13 @@ export function ScopeToolbar({ gov }) {
             const rMeta = REFERENT_ROLES.find((x) => x.id === ref.role);
             return (
               <option key={ref.id} value={ref.id}>
-                {ref.name} — {rMeta ? rMeta.label.split(' (')[0] : ref.role}
+                {ref.name} ({ref.email || 'sans email'}) — {rMeta ? rMeta.label.split(' (')[0] : ref.role}
               </option>
             );
           })}
         </select>
         <span className="px-2 py-0.5 rounded bg-indigo-900/90 border border-indigo-700/70 text-[11px] text-indigo-200">
-          {gov.roleMeta.canWrite ? 'Écriture autorisée' : 'Lecture seule'}
+          {gov.roleMeta.canWrite ? 'Lecture et écriture' : 'Lecture seule'}
         </span>
       </div>
 
@@ -373,83 +409,55 @@ export function ReferentTabContent({
         )}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-sm">
+      <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5 shadow-sm">
         <h3 className="font-semibold text-sm text-slate-900">
-          Gestion des rôles &amp; affectation des périmètres référents
+          Attribution des rôles &amp; périmètres référents
         </h3>
 
-        <div className="space-y-2.5">
-          {gov.referents.map((ref) => {
-            const rMeta = REFERENT_ROLES.find((x) => x.id === ref.role) || REFERENT_ROLES[0];
-            return (
-              <div
-                key={ref.id}
-                className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 bg-slate-50 text-xs"
-              >
-                <div>
-                  <div className="font-semibold text-slate-900">{ref.name}</div>
-                  <div className="text-slate-500">{rMeta.label}</div>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {PERIMETERS.map((p) => {
-                    const active = rMeta.allScopes || ref.scopes.includes(p.code);
-                    return (
-                      <button
-                        key={p.code}
-                        type="button"
-                        disabled={!gov.roleMeta.canWrite || rMeta.allScopes}
-                        onClick={() => gov.toggleReferentScope(ref.id, p.code)}
-                        className={`px-2 py-1 rounded text-[11px] font-medium border transition ${
-                          active
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-white text-slate-600 border-slate-200'
-                        } disabled:opacity-70`}
-                      >
-                        {p.short}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
         {gov.roleMeta.canWrite && (
-          <form onSubmit={gov.handleAddReferent} className="pt-3 border-t border-slate-100 space-y-2.5 text-xs">
+          <form
+            onSubmit={gov.handleAddReferent}
+            className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 space-y-3 text-xs"
+          >
             <div className="grid md:grid-cols-3 gap-2.5">
               <input
                 type="text"
                 value={gov.newRefName}
                 onChange={(e) => gov.setNewRefName(e.target.value)}
-                placeholder="Nom du référent (ex: Sophie Martin)"
-                className="border border-slate-200 rounded-lg px-3 py-2"
+                placeholder="Nom du référent (ex: Madame Dupont)"
+                className="bg-white border border-slate-200 rounded-lg px-3 py-2"
+                required
+              />
+              <input
+                type="email"
+                value={gov.newRefEmail}
+                onChange={(e) => gov.setNewRefEmail(e.target.value)}
+                placeholder="Adresse e-mail (ex: dupont@entreprise.fr)"
+                className="bg-white border border-slate-200 rounded-lg px-3 py-2"
+                required
               />
               <select
-                value={gov.newRefRole}
-                onChange={(e) => gov.setNewRefRole(e.target.value)}
-                className="border border-slate-200 rounded-lg px-3 py-2 bg-white"
+                value={gov.newRefAccess}
+                onChange={(e) => gov.setNewRefAccess(e.target.value)}
+                className="bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium"
               >
-                {REFERENT_ROLES.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.label}
-                  </option>
-                ))}
+                <option value="read_write">Autorisé en lecture et écriture</option>
+                <option value="read_only">Autorisé en lecture seule</option>
               </select>
-              <button
-                type="submit"
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg px-3 py-2"
-              >
-                Ajouter le référent
-              </button>
             </div>
-            {gov.newRefRole === 'referent_metier' && (
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-slate-500">Périmètres :</span>
+
+            <div className="space-y-1.5">
+              <div className="font-medium text-slate-800">
+                Est autorisée dans le(s) périmètre(s) suivant(s) :
+              </div>
+              <div className="flex flex-wrap gap-3">
                 {PERIMETERS.map((p) => {
                   const checked = gov.newRefScopes.includes(p.code);
                   return (
-                    <label key={p.code} className="flex items-center gap-1 text-slate-700">
+                    <label
+                      key={p.code}
+                      className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 cursor-pointer text-slate-700"
+                    >
                       <input
                         type="checkbox"
                         checked={checked}
@@ -461,14 +469,78 @@ export function ReferentTabContent({
                           )
                         }
                       />
-                      <span>{p.short}</span>
+                      <span>{p.label}</span>
                     </label>
                   );
                 })}
               </div>
-            )}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg px-4 py-2"
+              >
+                Enregistrer l'attribution
+              </button>
+            </div>
           </form>
         )}
+
+        <div className="space-y-2.5">
+          {gov.referents.map((ref) => {
+            const rMeta = REFERENT_ROLES.find((x) => x.id === ref.role) || REFERENT_ROLES[0];
+            const isRW = ref.accessLevel ? ref.accessLevel === 'read_write' : rMeta.canWrite;
+            return (
+              <div
+                key={ref.id}
+                className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 text-xs space-y-2.5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="font-semibold text-slate-900">{ref.name}</span>
+                    {ref.email && <span className="text-slate-500 ml-2">({ref.email})</span>}
+                  </div>
+                  <select
+                    value={isRW ? 'read_write' : 'read_only'}
+                    disabled={!gov.roleMeta.canWrite || rMeta.allScopes}
+                    onChange={(e) => gov.updateReferentAccess(ref.id, e.target.value)}
+                    className="bg-white border border-slate-200 rounded-md px-2 py-1 text-[11px] font-medium"
+                  >
+                    <option value="read_write">Lecture et écriture</option>
+                    <option value="read_only">Lecture seule</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] text-slate-500 mr-1">Périmètres :</span>
+                  {PERIMETERS.map((p) => {
+                    const active = rMeta.allScopes || ref.scopes.includes(p.code);
+                    return (
+                      <label
+                        key={p.code}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border cursor-pointer ${
+                          active
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={active}
+                          disabled={!gov.roleMeta.canWrite || rMeta.allScopes}
+                          onChange={() => gov.toggleReferentScope(ref.id, p.code)}
+                          className="sr-only"
+                        />
+                        <span>{p.short}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
