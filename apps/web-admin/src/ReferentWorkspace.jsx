@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Users, Layers } from 'lucide-react';
+import { Users, Layers, Mail } from 'lucide-react';
 
 export const PERIMETERS = [
   { code: 'socle_ri', label: 'Règlement Intérieur & Sécurité', short: 'Socle RI' },
@@ -50,6 +50,22 @@ export function getScopeShort(code) {
   return PERIMETERS.find((p) => p.code === code)?.short || code || 'Général';
 }
 
+function buildConfirmationMailto(referent) {
+  const accessText =
+    referent.accessLevel === 'read_write'
+      ? 'autorisé(e) en lecture et écriture'
+      : 'autorisé(e) en lecture seule';
+  const scopesText = (referent.scopes || []).map(getScopeLabel).join(', ');
+  const subject = encodeURIComponent('BOB — Confirmation de votre rôle de référent conformité');
+  const body = encodeURIComponent(
+    `Bonjour ${referent.name},\n\n` +
+      `Votre compte référent a bien été configuré sur BOB (Assistant Conformité et Réglementation).\n` +
+      `Vous êtes ${accessText} sur le(s) périmètre(s) suivant(s) : ${scopesText}.\n\n` +
+      `Cordialement,\nLa Gouvernance Conformité`
+  );
+  return `mailto:${encodeURIComponent(referent.email)}?subject=${subject}&body=${body}`;
+}
+
 export function useReferentGovernance({ documents, acknowledgments, escalations }) {
   const [referents, setReferents] = useState(() => {
     try {
@@ -67,6 +83,9 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
   const [newRefEmail, setNewRefEmail] = useState('');
   const [newRefAccess, setNewRefAccess] = useState('read_write');
   const [newRefScopes, setNewRefScopes] = useState(['socle_ri']);
+  const [sendConfirmationMail, setSendConfirmationMail] = useState(true);
+  const [lastCreatedReferent, setLastCreatedReferent] = useState(null);
+  const [refFeedback, setRefFeedback] = useState('');
 
   useEffect(() => {
     try {
@@ -119,19 +138,48 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
 
   const handleAddReferent = (e) => {
     e.preventDefault();
-    if (!newRefName.trim() || !newRefEmail.trim() || !canWrite) return;
+    setRefFeedback('');
+    if (!canWrite) {
+      setRefFeedback('Action impossible en mode lecture seule.');
+      return;
+    }
+    if (!newRefName.trim() || !newRefEmail.trim()) {
+      setRefFeedback('Renseignez le nom et l’adresse e-mail du référent.');
+      return;
+    }
+    const scopesToAssign = newRefScopes.length ? newRefScopes : ['socle_ri'];
     const created = {
       id: `ref-${Date.now()}`,
       name: newRefName.trim(),
       email: newRefEmail.trim(),
       role: 'referent_metier',
       accessLevel: newRefAccess,
-      scopes: newRefScopes.length ? newRefScopes : ['socle_ri'],
+      scopes: scopesToAssign,
     };
     setReferents((prev) => [...prev, created]);
-    setActiveReferentId(created.id);
+    setLastCreatedReferent(created);
     setNewRefName('');
     setNewRefEmail('');
+    setRefFeedback(
+      `${created.name} (${created.email}) ajouté en ${
+        created.accessLevel === 'read_write' ? 'lecture et écriture' : 'lecture seule'
+      } sur : ${scopesToAssign.map(getScopeShort).join(', ')}.`
+    );
+
+    if (sendConfirmationMail && typeof window !== 'undefined') {
+      window.location.href = buildConfirmationMailto(created);
+    }
+  };
+
+  const handleRemoveReferent = (refId) => {
+    if (!canWrite || referents.length <= 1) return;
+    setReferents((prev) => {
+      const next = prev.filter((r) => r.id !== refId);
+      if (activeReferentId === refId && next[0]) {
+        setActiveReferentId(next[0].id);
+      }
+      return next;
+    });
   };
 
   const updateReferentAccess = (refId, accessLevel) => {
@@ -176,7 +224,12 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
     setNewRefAccess,
     newRefScopes,
     setNewRefScopes,
+    sendConfirmationMail,
+    setSendConfirmationMail,
+    lastCreatedReferent,
+    refFeedback,
     handleAddReferent,
+    handleRemoveReferent,
     updateReferentAccess,
     toggleReferentScope,
   };
@@ -425,21 +478,20 @@ export function ReferentTabContent({
                 value={gov.newRefName}
                 onChange={(e) => gov.setNewRefName(e.target.value)}
                 placeholder="Nom du référent (ex: Madame Dupont)"
-                className="bg-white border border-slate-200 rounded-lg px-3 py-2"
-                required
+                className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-900"
               />
               <input
-                type="email"
+                type="text"
+                inputMode="email"
                 value={gov.newRefEmail}
                 onChange={(e) => gov.setNewRefEmail(e.target.value)}
                 placeholder="Adresse e-mail (ex: dupont@entreprise.fr)"
-                className="bg-white border border-slate-200 rounded-lg px-3 py-2"
-                required
+                className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-900"
               />
               <select
                 value={gov.newRefAccess}
                 onChange={(e) => gov.setNewRefAccess(e.target.value)}
-                className="bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium"
+                className="bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-900"
               >
                 <option value="read_write">Autorisé en lecture et écriture</option>
                 <option value="read_only">Autorisé en lecture seule</option>
@@ -476,7 +528,17 @@ export function ReferentTabContent({
               </div>
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <label className="inline-flex items-center gap-2 text-slate-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={gov.sendConfirmationMail}
+                  onChange={(e) => gov.setSendConfirmationMail(e.target.checked)}
+                />
+                <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Envoyer un e-mail de confirmation au référent lors de l'inscription</span>
+              </label>
+
               <button
                 type="submit"
                 className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg px-4 py-2"
@@ -484,6 +546,21 @@ export function ReferentTabContent({
                 Enregistrer l'attribution
               </button>
             </div>
+
+            {gov.refFeedback && (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-indigo-900 bg-indigo-100/80 border border-indigo-200 rounded-lg px-3 py-2">
+                <span>{gov.refFeedback}</span>
+                {gov.lastCreatedReferent?.email && (
+                  <a
+                    href={buildConfirmationMailto(gov.lastCreatedReferent)}
+                    className="inline-flex items-center gap-1 underline text-indigo-800 hover:text-indigo-950"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    Ouvrir le mail ({gov.lastCreatedReferent.email})
+                  </a>
+                )}
+              </div>
+            )}
           </form>
         )}
 
@@ -499,17 +576,39 @@ export function ReferentTabContent({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <span className="font-semibold text-slate-900">{ref.name}</span>
-                    {ref.email && <span className="text-slate-500 ml-2">({ref.email})</span>}
+                    {ref.email && (
+                      <span className="text-slate-600 ml-2 font-mono text-[11px]">{ref.email}</span>
+                    )}
                   </div>
-                  <select
-                    value={isRW ? 'read_write' : 'read_only'}
-                    disabled={!gov.roleMeta.canWrite || rMeta.allScopes}
-                    onChange={(e) => gov.updateReferentAccess(ref.id, e.target.value)}
-                    className="bg-white border border-slate-200 rounded-md px-2 py-1 text-[11px] font-medium"
-                  >
-                    <option value="read_write">Lecture et écriture</option>
-                    <option value="read_only">Lecture seule</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    {ref.email && (
+                      <a
+                        href={buildConfirmationMailto(ref)}
+                        className="text-[11px] text-indigo-700 hover:text-indigo-900 px-2 py-1 rounded border border-indigo-200 bg-white inline-flex items-center gap-1"
+                      >
+                        <Mail className="w-3 h-3" />
+                        Mail confirmation
+                      </a>
+                    )}
+                    <select
+                      value={isRW ? 'read_write' : 'read_only'}
+                      disabled={!gov.roleMeta.canWrite || rMeta.allScopes}
+                      onChange={(e) => gov.updateReferentAccess(ref.id, e.target.value)}
+                      className="bg-white border border-slate-200 rounded-md px-2 py-1 text-[11px] font-medium"
+                    >
+                      <option value="read_write">Lecture et écriture</option>
+                      <option value="read_only">Lecture seule</option>
+                    </select>
+                    {gov.roleMeta.canWrite && gov.referents.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => gov.handleRemoveReferent(ref.id)}
+                        className="text-[11px] text-red-600 hover:text-red-700 px-2 py-1 rounded border border-red-200 bg-white"
+                      >
+                        Retirer
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -530,7 +629,6 @@ export function ReferentTabContent({
                           checked={active}
                           disabled={!gov.roleMeta.canWrite || rMeta.allScopes}
                           onChange={() => gov.toggleReferentScope(ref.id, p.code)}
-                          className="sr-only"
                         />
                         <span>{p.short}</span>
                       </label>
