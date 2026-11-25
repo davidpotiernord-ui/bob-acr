@@ -49,7 +49,7 @@ router.get("/admin/overview", async (req, res) => {
            ROUND(AVG(confidence_score)::numeric, 3) AS avg_confidence
          FROM query_logs`
       ),
-      client.query(`SELECT COUNT(*)::int AS total_acknowledgments FROM acknowledgments`),
+      client.query(`SELECT ((SELECT COUNT(*)::int FROM acknowledgments) + (SELECT COUNT(*)::int FROM query_logs WHERE referent_acknowledged_at IS NOT NULL)) AS total_acknowledgments`),
     ]);
 
     await client.query("COMMIT");
