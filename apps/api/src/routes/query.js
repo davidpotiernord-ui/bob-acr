@@ -23,17 +23,19 @@ function formatContextSummary(context) {
 }
 
 function answerIndicatesMissingDocInfo(answerText) {
-  if (!answerText || typeof answerText !== 'string') return false;
+  if (!answerText || typeof answerText !== "string") return false;
   const normalized = answerText
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
   return (
-    normalized.includes('aucun extrait fourni ne traite') ||
-    normalized.includes("je n'ai pas la confirmation dans les documents") ||
-    normalized.includes("je n ai pas la confirmation dans les documents") ||
-    normalized.includes('escalader vers le referent')
+    normalized.includes("aucun extrait") ||
+    normalized.includes("aucune confirmation disponible") ||
+    normalized.includes("ne contiennent aucune information") ||
+    normalized.includes("n'ai pas la confirmation dans les documents") ||
+    normalized.includes("n ai pas la confirmation dans les documents") ||
+    (normalized.includes("escalader") && normalized.includes("referent"))
   );
 }
 

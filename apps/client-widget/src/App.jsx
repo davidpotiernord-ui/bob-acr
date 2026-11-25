@@ -99,14 +99,14 @@ export default function App() {
     }
   };
 
-  const handleAck = async (documentId) => {
-    if (!documentId || ackState[documentId] === 'loading') return;
-    setAckState((prev) => ({ ...prev, [documentId]: 'loading' }));
+  const handleAck = async (ackKey, documentId) => {
+    if (!ackKey || !documentId || ackState[ackKey] === 'loading') return;
+    setAckState((prev) => ({ ...prev, [ackKey]: 'loading' }));
     try {
       const res = await acknowledgeDocument({ documentId });
       setAckState((prev) => ({
         ...prev,
-        [documentId]: {
+        [ackKey]: {
           status: 'signed',
           at: new Date(res.proof?.acknowledged_at || Date.now()).toLocaleTimeString('fr-FR'),
           docTitle: res.proof?.document_title || 'Document',
@@ -114,7 +114,7 @@ export default function App() {
         },
       }));
     } catch {
-      setAckState((prev) => ({ ...prev, [documentId]: 'error' }));
+      setAckState((prev) => ({ ...prev, [ackKey]: 'error' }));
     }
   };
 
@@ -152,8 +152,11 @@ export default function App() {
 
       <div className="flex-1 overflow-y-auto p-3.5 space-y-3 bg-slate-50">
         {messages.map((msg, idx) => {
-          const primaryDocId = msg.sources?.[0]?.documentId || msg.sources?.[0]?.document_id || msg.sources?.[0]?.id;
-          const currentAck = primaryDocId ? ackState[primaryDocId] : null;
+          const primaryDocId =
+            msg.sources?.[0]?.documentId || msg.sources?.[0]?.document_id || msg.sources?.[0]?.id;
+          const ackKey = primaryDocId ? `${idx}:${primaryDocId}` : null;
+          const currentAck = ackKey ? ackState[ackKey] : null;
+          const canAcknowledge = Boolean(primaryDocId) && !msg.escalation;
 
           return (
             <div
@@ -193,7 +196,7 @@ export default function App() {
                       </div>
                     ))}
 
-                    {primaryDocId && (
+                    {canAcknowledge && (
                       <div className="pt-1.5">
                         {typeof currentAck === 'object' && currentAck.status === 'signed' ? (
                           <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
@@ -203,7 +206,7 @@ export default function App() {
                         ) : (
                           <button
                             type="button"
-                            onClick={() => handleAck(primaryDocId)}
+                            onClick={() => handleAck(ackKey, primaryDocId)}
                             disabled={currentAck === 'loading'}
                             className="w-full text-[11px] font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg px-2.5 py-1.5 flex items-center justify-center gap-1.5 transition"
                           >
