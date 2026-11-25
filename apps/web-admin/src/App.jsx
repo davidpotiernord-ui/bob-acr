@@ -184,18 +184,38 @@ export default function App() {
   };
 
   const handleExportPdf = () => {
-    const win = window.open("", "_blank", "width=900,height=700");
+    const win = window.open("", "_blank", "width=1100,height=760");
     if (!win) {
       setErrorMsg("Fenêtre pop-up bloquée : autorisez les pop-ups pour localhost:5173 afin de générer le PDF.");
       return;
     }
+
+    const escapeHtml = (v) =>
+      String(v ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+
+    const formatDate = (iso) => {
+      if (!iso) return "";
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("fr-FR");
+    };
+
     const dateStr = new Date().toLocaleString("fr-FR");
+
     const docRows = (documents || []).map((d) =>
-      `<tr><td>${d.module_code || ""}</td><td>${d.title || ""}</td><td>${d.version || ""}</td><td><code>${d.sha256_hash || ""}</code></td></tr>`
+      `<tr>
+        <td class="col-mod">${escapeHtml(d.module_code || "")}</td>
+        <td class="col-title">${escapeHtml(d.title || "")}</td>
+        <td class="col-ver">${escapeHtml(d.version || "")}</td>
+        <td class="col-hash"><code>${escapeHtml(d.sha256_hash || "")}</code></td>
+      </tr>`
     ).join("");
 
     const docAckRows = (acknowledgments || []).map((a) => ({
-      at: a.acknowledged_at || "",
+      at: formatDate(a.acknowledged_at),
       actor: a.user_email || a.full_name || "Salarié",
       label: a.document_title || "",
       hash: a.sha256_hash || "",
@@ -204,7 +224,7 @@ export default function App() {
     const refAckRows = (typeof escalations !== "undefined" ? escalations : [])
       .filter((e) => e.referent_acknowledged_at)
       .map((e) => ({
-        at: e.referent_acknowledged_at || "",
+        at: formatDate(e.referent_acknowledged_at),
         actor: e.answered_by_role || "Référent Conformité",
         label: e.question_topic ? `Question : ${e.question_topic}` : "Réponse référent",
         hash: e.referent_answer_sha256 || "",
@@ -212,18 +232,49 @@ export default function App() {
 
     const allAckRows = [...docAckRows, ...refAckRows];
     const ackRows = allAckRows.map((r) =>
-      `<tr><td>${r.at}</td><td>${r.actor}</td><td>${r.label}</td><td><code>${r.hash}</code></td></tr>`
+      `<tr>
+        <td class="col-date">${escapeHtml(r.at)}</td>
+        <td class="col-actor">${escapeHtml(r.actor)}</td>
+        <td class="col-label">${escapeHtml(r.label)}</td>
+        <td class="col-hash"><code>${escapeHtml(r.hash)}</code></td>
+      </tr>`
     ).join("");
 
     win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Preuve Art. R. 1321-1 — BOB</title>
-    <style>body{font-family:system-ui,sans-serif;padding:24px;color:#0f172a}h1{font-size:18px;margin-bottom:4px}p.meta{font-size:12px;color:#475569;margin-top:0}table{width:100%;border-collapse:collapse;margin:14px 0;font-size:11px}th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;word-break:break-all}th{background:#f1f5f9}</style></head><body>
-    <h1>Dossier de preuve réglementaire — Code du travail Art. R. 1321-1</h1>
-    <p class="meta">Atelier Métal &amp; Industrie du Sud SAS • Généré le ${dateStr}</p>
-    <h2>Documents &amp; empreintes SHA-256 (${(documents || []).length})</h2>
-    <table><thead><tr><th>Module</th><th>Titre</th><th>Version</th><th>SHA-256</th></tr></thead><tbody>${docRows}</tbody></table>
-    <h2>Émargements enregistrés (${allAckRows.length})</h2>
-    <table><thead><tr><th>Horodatage</th><th>Signataire / Rôle</th><th>Document / Question</th><th>SHA-256</th></tr></thead><tbody>${ackRows}</tbody></table>
-    <script>window.onload=()=>setTimeout(()=>window.print(),200);</script></body></html>`);
+    <style>
+      @page { size: A4 landscape; margin: 14mm; }
+      * { box-sizing: border-box; }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 8px; color: #0f172a; margin: 0; }
+      h1 { font-size: 18px; margin: 0 0 4px 0; }
+      p.meta { font-size: 12px; color: #475569; margin: 0 0 18px 0; }
+      h2 { font-size: 14px; margin: 18px 0 8px 0; color: #1e293b; page-break-after: avoid; }
+      table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10.5px; }
+      th, td { border: 1px solid #cbd5e1; padding: 7px 8px; text-align: left; vertical-align: top; }
+      th { background: #f1f5f9; font-weight: 600; color: #0f172a; }
+      tr { break-inside: avoid; page-break-inside: avoid; }
+      .col-mod { width: 11%; word-break: break-word; }
+      .col-title { width: 31%; word-break: break-word; }
+      .col-ver { width: 9%; }
+      .col-date { width: 16%; word-break: break-word; }
+      .col-actor { width: 20%; word-break: break-word; }
+      .col-label { width: 31%; word-break: break-word; }
+      .col-hash { width: 33%; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; line-height: 1.35; display: block; word-break: break-all; overflow-wrap: anywhere; }
+    </style></head><body>
+      <h1>Dossier de preuve réglementaire — Code du travail Art. R. 1321-1</h1>
+      <p class="meta">Atelier Métal &amp; Industrie du Sud SAS • Généré le ${escapeHtml(dateStr)}</p>
+      <h2>Documents &amp; empreintes SHA-256 (${(documents || []).length})</h2>
+      <table>
+        <thead><tr><th class="col-mod">Module</th><th class="col-title">Titre</th><th class="col-ver">Version</th><th class="col-hash">SHA-256</th></tr></thead>
+        <tbody>${docRows}</tbody>
+      </table>
+      <h2>Émargements enregistrés (${allAckRows.length})</h2>
+      <table>
+        <thead><tr><th class="col-date">Horodatage</th><th class="col-actor">Signataire / Rôle</th><th class="col-label">Document / Question</th><th class="col-hash">SHA-256</th></tr></thead>
+        <tbody>${ackRows}</tbody>
+      </table>
+      <script>window.onload=()=>setTimeout(()=>window.print(),250);</script>
+    </body></html>`);
     win.document.close();
   };
 
