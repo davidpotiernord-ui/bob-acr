@@ -125,6 +125,7 @@ export default function App() {
 
   const handleExportCsv = () => {
     const headers = [
+      'proof_type',
       'id',
       'acknowledged_at',
       'user_email',
@@ -137,15 +138,49 @@ export default function App() {
       'sha256_hash',
     ];
     const escapeCsv = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-    const rows = acknowledgments.map((a) => headers.map((h) => escapeCsv(a[h])).join(','));
-    const csv = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+
+    const docRows = (acknowledgments || []).map((a) => ({
+      proof_type: 'document_acknowledgment',
+      id: a.id,
+      acknowledged_at: a.acknowledged_at,
+      user_email: a.user_email ?? '',
+      full_name: a.full_name ?? '',
+      department: a.department ?? '',
+      document_id: a.document_id ?? '',
+      document_title: a.document_title ?? '',
+      document_version: a.document_version ?? '',
+      module_code: a.module_code ?? '',
+      sha256_hash: a.sha256_hash ?? '',
+    }));
+
+    const refRows = (typeof escalations !== "undefined" ? escalations : [])
+      .filter((e) => e.referent_acknowledged_at)
+      .map((e) => ({
+        proof_type: 'referent_answer_acknowledgment',
+        id: e.id,
+        acknowledged_at: e.referent_acknowledged_at,
+        user_email: '',
+        full_name: e.answered_by_role || 'Référent Conformité',
+        department: '',
+        document_id: '',
+        document_title: e.question_topic ? `Question : ${e.question_topic}` : '',
+        document_version: '',
+        module_code: e.module_code ?? '',
+        sha256_hash: e.referent_answer_sha256 ?? '',
+      }));
+
+    const allRows = [...docRows, ...refRows];
+    const csvLines = allRows.map((row) => headers.map((h) => escapeCsv(row[h])).join(','));
+    const csv = '\uFEFF' + [headers.join(','), ...csvLines].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
     link.download = `bob-acr-emargements-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
     link.click();
-    URL.revokeObjectURL(url);
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleExportProof = () => {
@@ -172,8 +207,10 @@ export default function App() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `bob-acr-dossier-preuve-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 
     setExported(true);
     setTimeout(() => setExported(false), 3500);
@@ -257,7 +294,7 @@ export default function App() {
             Synchroniser
           </button>
           <button
-            onClick={() => { handleExportProof(); handleExportCsv(); }}
+            onClick={() => { try { handleExportProof(); handleExportCsv(); setExported(true); } catch (e) { setErrorMsg(`Erreur export : ${e.message}`); } }}
             className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-2 rounded-lg flex items-center gap-2"
           >
             <Download className="w-4 h-4" />
