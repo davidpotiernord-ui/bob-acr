@@ -11,24 +11,31 @@ import {
   RefreshCw,
   FileCheck2,
   BarChart3,
+  Users,
 } from 'lucide-react';
+import {
+  useReferentGovernance,
+  ScopeToolbar,
+  PerimeterKpiGrid,
+  ReferentTabContent,
+} from './ReferentWorkspace';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://bob-acr-api.osc-fr1.scalingo.io/api';
+const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
 
 function getAuthHeaders(extra = {}) {
   const token =
-    (typeof window !== "undefined" && window.sessionStorage?.getItem("bob_admin_key")) ||
+    (typeof window !== 'undefined' && window.sessionStorage?.getItem('bob_admin_key')) ||
     import.meta.env.VITE_BOB_ADMIN_KEY ||
-    "";
+    '';
   return {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...extra,
   };
 }
-const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
 
 export default function App() {
-  const [tab, setTab] = useState('documents');
+  const [tab, setTab] = useState('referent');
   const [useSharedBase, setUseSharedBase] = useState(true);
   const [authMode, setAuthMode] = useState('sso');
   const [exported, setExported] = useState(false);
@@ -42,9 +49,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [adminKeyInput, setAdminKeyInput] = useState(() =>
-    (typeof window !== "undefined" && window.sessionStorage?.getItem("bob_admin_key")) ||
+    (typeof window !== 'undefined' && window.sessionStorage?.getItem('bob_admin_key')) ||
     import.meta.env.VITE_BOB_ADMIN_KEY ||
-    ""
+    ''
   );
 
   const [title, setTitle] = useState('');
@@ -53,6 +60,8 @@ export default function App() {
   const [requiresAck, setRequiresAck] = useState(true);
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const gov = useReferentGovernance({ documents, acknowledgments, escalations });
 
   const fetchAll = async () => {
     setLoading(true);
@@ -67,7 +76,7 @@ export default function App() {
       ]);
 
       if (!ovRes.ok || !docRes.ok || !ackRes.ok || !escRes.ok) {
-        throw new Error('Erreur HTTP lors du chargement du cockpit');
+        throw new Error(`HTTP ${ovRes.status}/${docRes.status}/${ackRes.status}/${escRes.status}`);
       }
 
       const [ovData, docData, ackData, escData] = await Promise.all([
@@ -82,7 +91,7 @@ export default function App() {
       setAcknowledgments(ackData.acknowledgments || []);
       setEscalations(escData.escalations || []);
     } catch (err) {
-      setErrorMsg(`Impossible de synchroniser l'API Scalingo : ${err.message}`);
+      setErrorMsg(`Synchronisation API : ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -94,7 +103,7 @@ export default function App() {
 
   const handlePublish = async (e) => {
     e.preventDefault();
-    if (!title.trim() || !content.trim() || submitting) return;
+    if (!title.trim() || !content.trim() || submitting || !gov.roleMeta.canWrite) return;
     setSubmitting(true);
     setErrorMsg('');
     try {
@@ -120,6 +129,43 @@ export default function App() {
       setErrorMsg(`Erreur lors de l'ingestion : ${err.message}`);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleReplyEscalation = async (queryId) => {
+    const answerText = (replyDrafts[queryId] || '').trim();
+    if (!answerText || replySaving[queryId] || !gov.roleMeta.canWrite) return;
+    setReplySaving((prev) => ({ ...prev, [queryId]: true }));
+    try {
+      const res = await fetch(`${API_BASE}/admin/escalations/${queryId}/reply`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ answer: answerText }),
+      });
+      const data = await res.json();
+      if (res.ok && data.escalation) {
+        const targetEsc = escalations.find((item) => item.id === queryId);
+        setEscalations((prev) =>
+          prev.map((item) => (item.id === queryId ? { ...item, ...data.escalation } : item))
+        );
+        setReplyDrafts((prev) => ({ ...prev, [queryId]: '' }));
+        if (gov.publishToKnowledgeBase[queryId] && targetEsc) {
+          await fetch(`${API_BASE}/documents`, {
+            method: 'POST',
+            headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+              title: `Réponse référent — ${(targetEsc.question_topic || 'Conformité').slice(0, 80)}`,
+              module_code: targetEsc.module_code || 'socle_ri',
+              version: '1.0',
+              requires_acknowledgment: false,
+              content: `Question : ${targetEsc.question_topic || ''}\n\nRéponse officielle (${gov.activeReferent.name}) : ${answerText}`,
+            }),
+          }).catch(() => {});
+          await fetchAll();
+        }
+      }
+    } finally {
+      setReplySaving((prev) => ({ ...prev, [queryId]: false }));
     }
   };
 
@@ -153,7 +199,7 @@ export default function App() {
       sha256_hash: a.sha256_hash ?? '',
     }));
 
-    const refRows = (typeof escalations !== "undefined" ? escalations : [])
+    const refRows = (escalations || [])
       .filter((e) => e.referent_acknowledged_at)
       .map((e) => ({
         proof_type: 'referent_answer_acknowledgment',
@@ -184,64 +230,70 @@ export default function App() {
   };
 
   const handleExportPdf = () => {
-    const win = window.open("", "_blank", "width=1150,height=780");
+    const win = window.open('', '_blank', 'width=1150,height=780');
     if (!win) {
-      setErrorMsg("Fenêtre pop-up bloquée : autorisez les pop-ups pour localhost:5173 afin de générer le PDF.");
+      setErrorMsg('Fenêtre pop-up bloquée : autorisez les pop-ups pour générer le PDF.');
       return;
     }
 
     const escapeHtml = (v) =>
-      String(v ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
+      String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
 
     const formatDate = (iso) => {
-      if (!iso) return "";
+      if (!iso) return '';
       const d = new Date(iso);
-      return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("fr-FR");
+      return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('fr-FR');
     };
 
-    const dateStr = new Date().toLocaleString("fr-FR");
+    const dateStr = new Date().toLocaleString('fr-FR');
 
-    const docRows = (documents || []).map((d) =>
-      `<tr>
-        <td class="col-mod">${escapeHtml(d.module_code || "")}</td>
-        <td class="col-title">${escapeHtml(d.title || "")}</td>
-        <td class="col-ver">${escapeHtml(d.version || "")}</td>
-        <td class="col-hash"><code>${escapeHtml(d.sha256_hash || "")}</code></td>
+    const docRows = (documents || [])
+      .map(
+        (d) =>
+          `<tr>
+        <td class="col-mod">${escapeHtml(d.module_code || '')}</td>
+        <td class="col-title">${escapeHtml(d.title || '')}</td>
+        <td class="col-ver">${escapeHtml(d.version || '')}</td>
+        <td class="col-hash"><code>${escapeHtml(d.sha256_hash || '')}</code></td>
       </tr>`
-    ).join("");
+      )
+      .join('');
 
     const docAckRows = (acknowledgments || []).map((a) => ({
-      type: "Document",
-      subject: a.document_title || "",
+      type: 'Document',
+      subject: a.document_title || '',
       ackAt: formatDate(a.acknowledged_at),
-      actor: a.user_email || a.full_name || "Salarié",
-      hash: a.sha256_hash || "",
+      actor: a.user_email || a.full_name || 'Salarié',
+      hash: a.sha256_hash || '',
     }));
 
-    const refAckRows = (typeof escalations !== "undefined" ? escalations : [])
+    const refAckRows = (escalations || [])
       .filter((e) => e.referent_acknowledged_at)
       .map((e) => ({
-        type: "Question escaladée",
-        subject: e.question_topic || "Réponse référent",
+        type: 'Question escaladée',
+        subject: e.question_topic || 'Réponse référent',
         ackAt: formatDate(e.referent_acknowledged_at),
-        actor: e.answered_by_role || "Référent Conformité",
-        hash: e.referent_answer_sha256 || "",
+        actor: e.answered_by_role || 'Référent Conformité',
+        hash: e.referent_answer_sha256 || '',
       }));
 
     const allAckRows = [...refAckRows, ...docAckRows];
-    const ackRows = allAckRows.map((r) =>
-      `<tr>
-        <td class="col-type"><span class="tag ${r.type === "Question escaladée" ? "tag-q" : "tag-d"}">${escapeHtml(r.type)}</span></td>
+    const ackRows = allAckRows
+      .map(
+        (r) =>
+          `<tr>
+        <td class="col-type"><span class="tag ${r.type === 'Question escaladée' ? 'tag-q' : 'tag-d'}">${escapeHtml(r.type)}</span></td>
         <td class="col-subject">${escapeHtml(r.subject)}</td>
         <td class="col-ack"><span class="badge-ok">ÉMARGÉ</span><div class="ack-time">${escapeHtml(r.ackAt)}</div></td>
         <td class="col-actor">${escapeHtml(r.actor)}</td>
         <td class="col-hash"><code>${escapeHtml(r.hash)}</code></td>
       </tr>`
-    ).join("");
+      )
+      .join('');
 
     win.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Preuve Art. R. 1321-1 — BOB</title>
     <style>
@@ -328,27 +380,6 @@ export default function App() {
     setTimeout(() => setExported(false), 3500);
   };
 
-    const handleReplyEscalation = async (queryId) => {
-    const answerText = (replyDrafts[queryId] || '').trim();
-    if (!answerText || replySaving[queryId]) return;
-    setReplySaving((prev) => ({ ...prev, [queryId]: true }));
-    try {
-      const res = await fetch(`${API_BASE}/admin/escalations/${queryId}/reply`, {
-        method: 'POST',
-        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ answer: answerText }),
-      });
-      const data = await res.json();
-      if (res.ok && data.escalation) {
-        setEscalations((prev) =>
-          prev.map((item) => (item.id === queryId ? { ...item, ...data.escalation } : item))
-        );
-        setReplyDrafts((prev) => ({ ...prev, [queryId]: '' }));
-      }
-    } finally {
-      setReplySaving((prev) => ({ ...prev, [queryId]: false }));
-    }
-  };
   return (
     <>
       <div className="bg-slate-900 text-slate-100 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2 border-b border-slate-800">
@@ -364,8 +395,8 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              if (typeof window !== "undefined") {
-                window.sessionStorage?.setItem("bob_admin_key", adminKeyInput.trim());
+              if (typeof window !== 'undefined') {
+                window.sessionStorage?.setItem('bob_admin_key', adminKeyInput.trim());
               }
               fetchAll();
             }}
@@ -376,9 +407,9 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setAdminKeyInput("");
-              if (typeof window !== "undefined") {
-                window.sessionStorage?.removeItem("bob_admin_key");
+              setAdminKeyInput('');
+              if (typeof window !== 'undefined') {
+                window.sessionStorage?.removeItem('bob_admin_key');
               }
               fetchAll();
             }}
@@ -388,340 +419,421 @@ export default function App() {
           </button>
         </div>
       </div>
+
       <div className="min-h-screen flex flex-col bg-slate-50">
-      <header className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <ShieldCheck className="w-6 h-6 text-indigo-400" />
-          <div>
-            <h1 className="font-semibold text-base">BOB — Gouvernance & Conformité</h1>
-            <p className="text-xs text-slate-400">Atelier Métal & Industrie du Sud SAS • Scalingo osc-fr1</p>
+        <header className="bg-slate-900 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <ShieldCheck className="w-6 h-6 text-indigo-400" />
+            <div>
+              <h1 className="font-semibold text-base">BOB — Gouvernance &amp; Conformité</h1>
+              <p className="text-xs text-slate-400">Atelier Métal &amp; Industrie du Sud SAS • Scalingo osc-fr1</p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={fetchAll}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Synchroniser
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  handleExportProof();
+                  handleExportCsv();
+                  setExported(true);
+                } catch (e) {
+                  setErrorMsg(`Erreur export : ${e.message}`);
+                }
+              }}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-2 rounded-lg flex items-center gap-2"
+            >
+              <Download className="w-4 h-4" />
+              Export preuve (Art. R. 1321-1)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  handleExportPdf();
+                } catch (e) {
+                  setErrorMsg(`Erreur PDF : ${e.message}`);
+                }
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 border border-slate-700"
+            >
+              Export PDF
+            </button>
+          </div>
+        </header>
+
+        <ScopeToolbar gov={gov} />
+
+        {exported && (
+          <div className="bg-emerald-600 text-white text-xs py-2 px-6 flex items-center justify-center gap-2">
+            <CheckCircle2 className="w-4 h-4" />
+            Dossier de preuve téléchargé ({documents.length} documents SHA-256 et {acknowledgments.length} émargements).
+          </div>
+        )}
+
+        {errorMsg && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-xs py-2 px-6 text-center">
+            {errorMsg}
+          </div>
+        )}
+
+        {overview && (
+          <section className="bg-white border-b border-slate-200 px-6 py-3">
+            <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                <div className="text-slate-500 flex items-center gap-1">
+                  <FileText className="w-3.5 h-3.5 text-indigo-600" /> Documents / Chunks
+                </div>
+                <div className="text-base font-semibold text-slate-900 mt-1">
+                  {overview.total_documents} docs • {overview.total_chunks} chunks
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                <div className="text-slate-500 flex items-center gap-1">
+                  <BarChart3 className="w-3.5 h-3.5 text-indigo-600" /> Requêtes / Confiance moy.
+                </div>
+                <div className="text-base font-semibold text-slate-900 mt-1">
+                  {overview.total_queries} req. • {overview.avg_confidence ?? '—'}
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                <div className="text-slate-500 flex items-center gap-1">
+                  <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" /> Émargements SHA-256
+                </div>
+                <div className="text-base font-semibold text-emerald-700 mt-1">
+                  {overview.total_acknowledgments} signatures
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                <div className="text-slate-500 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> Escalades référents
+                </div>
+                <div className="text-base font-semibold text-amber-700 mt-1">
+                  {overview.escalated_queries} alertes
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        <PerimeterKpiGrid gov={gov} />
+
+        <nav className="bg-white border-b border-slate-200 px-6 flex flex-wrap gap-6 text-sm">
           <button
-            onClick={fetchAll}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5"
+            type="button"
+            onClick={() => setTab('referent')}
+            className={`py-3 border-b-2 flex items-center gap-2 ${
+              tab === 'referent'
+                ? 'border-indigo-600 text-indigo-600 font-medium'
+                : 'border-transparent text-slate-600'
+            }`}
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Synchroniser
-          </button>
-          <button
-            onClick={() => { try { handleExportProof(); handleExportCsv(); setExported(true); } catch (e) { setErrorMsg(`Erreur export : ${e.message}`); } }}
-            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3.5 py-2 rounded-lg flex items-center gap-2"
-          >
-            <Download className="w-4 h-4" />
-            Export preuve (Art. R. 1321-1)
+            <Users className="w-4 h-4 text-indigo-600" />
+            Espace Référent ({gov.filteredEscalations.filter((e) => !e.referent_answer).length} en attente)
           </button>
           <button
             type="button"
-            onClick={() => { try { handleExportPdf(); } catch (e) { setErrorMsg(`Erreur PDF : ${e.message}`); } }}
-            className="bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 border border-slate-700"
+            onClick={() => setTab('documents')}
+            className={`py-3 border-b-2 flex items-center gap-2 ${
+              tab === 'documents'
+                ? 'border-indigo-600 text-indigo-600 font-medium'
+                : 'border-transparent text-slate-600'
+            }`}
           >
-            Export PDF
+            <FileText className="w-4 h-4" /> Documents ({gov.filteredDocuments.length})
           </button>
-        </div>
-      </header>
+          <button
+            type="button"
+            onClick={() => setTab('acknowledgments')}
+            className={`py-3 border-b-2 flex items-center gap-2 ${
+              tab === 'acknowledgments'
+                ? 'border-indigo-600 text-indigo-600 font-medium'
+                : 'border-transparent text-slate-600'
+            }`}
+          >
+            <FileCheck2 className="w-4 h-4 text-emerald-600" /> Émargements ({gov.filteredAcknowledgments.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('friction')}
+            className={`py-3 border-b-2 flex items-center gap-2 ${
+              tab === 'friction'
+                ? 'border-indigo-600 text-indigo-600 font-medium'
+                : 'border-transparent text-slate-600'
+            }`}
+          >
+            <AlertTriangle className="w-4 h-4 text-amber-500" /> Zones de friction ({gov.filteredEscalations.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('settings')}
+            className={`py-3 border-b-2 flex items-center gap-2 ${
+              tab === 'settings'
+                ? 'border-indigo-600 text-indigo-600 font-medium'
+                : 'border-transparent text-slate-600'
+            }`}
+          >
+            <Settings className="w-4 h-4" /> SSO &amp; Socle commun
+          </button>
+        </nav>
 
-      {exported && (
-        <div className="bg-emerald-600 text-white text-xs py-2 px-6 flex items-center justify-center gap-2">
-          <CheckCircle2 className="w-4 h-4" />
-          Dossier de preuve téléchargé ({documents.length} documents SHA-256 et {acknowledgments.length} émargements).
-        </div>
-      )}
+        <main className="max-w-5xl w-full mx-auto p-6 flex-1 space-y-6">
+          {tab === 'referent' && (
+            <ReferentTabContent
+              gov={gov}
+              replyDrafts={replyDrafts}
+              setReplyDrafts={setReplyDrafts}
+              replySaving={replySaving}
+              handleReplyEscalation={handleReplyEscalation}
+            />
+          )}
 
-      {errorMsg && (
-        <div className="bg-red-600 text-white text-xs py-2 px-6 text-center">{errorMsg}</div>
-      )}
-
-      {overview && (
-        <section className="bg-white border-b border-slate-200 px-6 py-3">
-          <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-              <div className="text-slate-500 flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-indigo-600" /> Documents / Chunks</div>
-              <div className="text-base font-semibold text-slate-900 mt-1">{overview.total_documents} docs • {overview.total_chunks} chunks</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-              <div className="text-slate-500 flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5 text-indigo-600" /> Requêtes / Confiance moy.</div>
-              <div className="text-base font-semibold text-slate-900 mt-1">{overview.total_queries} req. • {overview.avg_confidence ?? '—'}</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-              <div className="text-slate-500 flex items-center gap-1"><FileCheck2 className="w-3.5 h-3.5 text-emerald-600" /> Émargements SHA-256</div>
-              <div className="text-base font-semibold text-emerald-700 mt-1">{overview.total_acknowledgments} signatures</div>
-            </div>
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-              <div className="text-slate-500 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> Escalades référents</div>
-              <div className="text-base font-semibold text-amber-700 mt-1">{overview.escalated_queries} alertes</div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      <nav className="bg-white border-b border-slate-200 px-6 flex gap-6 text-sm">
-        <button
-          onClick={() => setTab('documents')}
-          className={`py-3 border-b-2 flex items-center gap-2 ${
-            tab === 'documents' ? 'border-indigo-600 text-indigo-600 font-medium' : 'border-transparent text-slate-600'
-          }`}
-        >
-          <FileText className="w-4 h-4" /> Documents ({documents.length})
-        </button>
-        <button
-          onClick={() => setTab('acknowledgments')}
-          className={`py-3 border-b-2 flex items-center gap-2 ${
-            tab === 'acknowledgments' ? 'border-indigo-600 text-indigo-600 font-medium' : 'border-transparent text-slate-600'
-          }`}
-        >
-          <FileCheck2 className="w-4 h-4 text-emerald-600" /> Émargements ({acknowledgments.length})
-        </button>
-        <button
-          onClick={() => setTab('friction')}
-          className={`py-3 border-b-2 flex items-center gap-2 ${
-            tab === 'friction' ? 'border-indigo-600 text-indigo-600 font-medium' : 'border-transparent text-slate-600'
-          }`}
-        >
-          <AlertTriangle className="w-4 h-4 text-amber-500" /> Zones de friction ({escalations.length})
-        </button>
-        <button
-          onClick={() => setTab('settings')}
-          className={`py-3 border-b-2 flex items-center gap-2 ${
-            tab === 'settings' ? 'border-indigo-600 text-indigo-600 font-medium' : 'border-transparent text-slate-600'
-          }`}
-        >
-          <Settings className="w-4 h-4" /> SSO & Socle commun
-        </button>
-      </nav>
-
-      <main className="max-w-5xl w-full mx-auto p-6 flex-1 space-y-6">
-        {tab === 'documents' && (
-          <>
-            <form
-              onSubmit={handlePublish}
-              className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-sm"
-            >
-              <h2 className="font-semibold text-sm flex items-center gap-2">
-                <PlusCircle className="w-4 h-4 text-indigo-600" />
-                Publier et vectoriser un nouveau document (SHA-256 + Mistral)
-              </h2>
-
-              <div className="grid md:grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Titre (ex: Charte Sécurité Atelier)"
-                  className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                  required
-                />
-                <select
-                  value={moduleCode}
-                  onChange={(e) => setModuleCode(e.target.value)}
-                  className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+          {tab === 'documents' && (
+            <>
+              {gov.roleMeta.canWrite && (
+                <form
+                  onSubmit={handlePublish}
+                  className="bg-white rounded-xl border border-slate-200 p-5 space-y-4 shadow-sm"
                 >
-                  <option value="socle_ri">socle_ri — Règlement Intérieur</option>
-                  <option value="rgpd">rgpd — Protection des données</option>
-                  <option value="sapin_ii">sapin_ii — Anti-corruption</option>
-                  <option value="cyber">cyber — Sécurité SI</option>
-                  <option value="lcb_ft">lcb_ft — Conformité financière</option>
-                </select>
-                <input
-                  type="text"
-                  value={version}
-                  onChange={(e) => setVersion(e.target.value)}
-                  placeholder="Version (ex: 1.0)"
-                  className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                />
-              </div>
+                  <h2 className="font-semibold text-sm flex items-center gap-2">
+                    <PlusCircle className="w-4 h-4 text-indigo-600" />
+                    Publier et vectoriser un nouveau document (SHA-256 + Mistral)
+                  </h2>
 
-              <textarea
-                rows={4}
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                placeholder="Collez ici les articles ou règles applicables à indexer dans BOB..."
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                required
-              />
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <input
+                      type="text"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="Titre (ex: Charte Sécurité Atelier)"
+                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                      required
+                    />
+                    <select
+                      value={moduleCode}
+                      onChange={(e) => setModuleCode(e.target.value)}
+                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+                    >
+                      <option value="socle_ri">socle_ri — Règlement Intérieur</option>
+                      <option value="rgpd">rgpd — Protection des données</option>
+                      <option value="sapin_ii">sapin_ii — Anti-corruption</option>
+                      <option value="cyber">cyber — Sécurité SI</option>
+                      <option value="lcb_ft">lcb_ft — Conformité financière</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={version}
+                      onChange={(e) => setVersion(e.target.value)}
+                      placeholder="Version (ex: 1.0)"
+                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
 
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-xs text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={requiresAck}
-                    onChange={(e) => setRequiresAck(e.target.checked)}
+                  <textarea
+                    rows={4}
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    placeholder="Collez ici les articles ou règles applicables à indexer dans BOB..."
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+                    required
                   />
-                  <span>Émargement salarié obligatoire (opposabilité)</span>
-                </label>
 
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-2 rounded-lg"
-                >
-                  {submitting ? 'Vectorisation Mistral en cours...' : 'Publier et indexer'}
-                </button>
-              </div>
-            </form>
-
-            <div className="space-y-3">
-              {documents.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="bg-white rounded-xl border border-slate-200 p-5 space-y-2 shadow-sm"
-                >
                   <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-[11px] uppercase tracking-wide font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded mr-2">
-                        {doc.module_code}
+                    <label className="flex items-center gap-2 text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={requiresAck}
+                        onChange={(e) => setRequiresAck(e.target.checked)}
+                      />
+                      <span>Émargement salarié obligatoire (opposabilité)</span>
+                    </label>
+
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-2 rounded-lg"
+                    >
+                      {submitting ? 'Vectorisation Mistral en cours...' : 'Publier et indexer'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              <div className="space-y-3">
+                {gov.filteredDocuments.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="bg-white rounded-xl border border-slate-200 p-5 space-y-2 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-[11px] uppercase tracking-wide font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded mr-2">
+                          {doc.module_code}
+                        </span>
+                        <span className="font-semibold text-sm">{doc.title}</span>
+                        <span className="text-xs text-slate-500 ml-2">v{doc.version}</span>
+                      </div>
+                      <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-medium">
+                        {doc.status} • {doc.chunk_count} chunk(s)
                       </span>
-                      <span className="font-semibold text-sm">{doc.title}</span>
-                      <span className="text-xs text-slate-500 ml-2">v{doc.version}</span>
                     </div>
-                    <span className="text-xs bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full font-medium">
-                      {doc.status} • {doc.chunk_count} chunk(s)
+                    <p className="text-xs text-slate-600">
+                      Empreinte SHA-256 :{' '}
+                      <code className="bg-slate-100 px-2 py-0.5 rounded break-all">{doc.sha256_hash}</code>
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {tab === 'acknowledgments' && (
+            <div className="space-y-3">
+              {gov.filteredAcknowledgments.length === 0 ? (
+                <div className="bg-white rounded-xl border border-slate-200 p-5 text-sm text-slate-500">
+                  Aucun émargement enregistré pour ce périmètre.
+                </div>
+              ) : (
+                gov.filteredAcknowledgments.map((ack) => (
+                  <div
+                    key={ack.id}
+                    className="bg-white rounded-xl border border-slate-200 p-5 space-y-1.5 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-semibold text-slate-900">
+                        {ack.full_name || ack.user_email}{' '}
+                        <span className="text-xs font-normal text-slate-500">
+                          ({ack.user_email}
+                          {ack.department ? ` • ${ack.department}` : ''})
+                        </span>
+                      </div>
+                      <span className="text-xs text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full font-medium">
+                        Signé le {new Date(ack.acknowledged_at).toLocaleString('fr-FR')}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-700">
+                      Document : <strong>{ack.document_title}</strong> (v{ack.document_version} • {ack.module_code})
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      SHA-256 certifié : <code className="bg-slate-100 px-1.5 py-0.5 rounded">{ack.sha256_hash}</code>
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {tab === 'friction' && (
+            <div className="space-y-3">
+              {gov.filteredEscalations.map((esc) => (
+                <div
+                  key={esc.id}
+                  className="bg-white rounded-xl border border-slate-200 p-5 space-y-2.5 shadow-sm"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold uppercase text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full">
+                        Réf. #{String(esc.id).slice(0, 8).toUpperCase()} •{' '}
+                        {esc.was_escalated ? 'Transmise au référent' : 'Hors périmètre'}
+                      </span>
+                      {esc.referent_acknowledged_at && (
+                        <span className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                          Émargé le {new Date(esc.referent_acknowledged_at).toLocaleString('fr-FR')}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-slate-500">
+                      Canal : {esc.channel} • Confiance : {esc.confidence_score ?? '0.000'} •{' '}
+                      {esc.created_at ? new Date(esc.created_at).toLocaleString('fr-FR') : ''}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-600">
-                    Empreinte SHA-256 :{' '}
-                    <code className="bg-slate-100 px-2 py-0.5 rounded break-all">{doc.sha256_hash}</code>
-                  </p>
+                  <p className="text-sm font-medium text-slate-900">« {esc.question_topic} »</p>
+                  <p className="text-xs text-slate-500">Module : {esc.module_code || 'non classé'}</p>
+                  {esc.referent_answer ? (
+                    <div className="mt-2 rounded-lg bg-emerald-50/70 border border-emerald-200 p-3 space-y-1">
+                      <div className="flex items-center justify-between text-xs font-medium text-emerald-900">
+                        <span>Réponse officielle publiée ({esc.answered_by_role || 'Référent Conformité'})</span>
+                        {esc.answered_at && <span>{new Date(esc.answered_at).toLocaleString('fr-FR')}</span>}
+                      </div>
+                      <p className="text-sm text-slate-800 whitespace-pre-line">{esc.referent_answer}</p>
+                      {esc.referent_answer_sha256 && (
+                        <p className="text-[11px] text-slate-500">
+                          SHA-256 :{' '}
+                          <code className="bg-white px-1 py-0.5 rounded border border-slate-200">
+                            {esc.referent_answer_sha256}
+                          </code>
+                        </p>
+                      )}
+                    </div>
+                  ) : gov.roleMeta.canWrite ? (
+                    <div className="pt-2 border-t border-slate-100 space-y-2">
+                      <textarea
+                        rows={2}
+                        value={replyDrafts[esc.id] || ''}
+                        onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [esc.id]: e.target.value }))}
+                        placeholder="Rédiger la réponse officielle du référent conformité..."
+                        className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleReplyEscalation(esc.id)}
+                          disabled={replySaving[esc.id] || !(replyDrafts[esc.id] || '').trim()}
+                          className="text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white px-3.5 py-1.5 rounded-lg transition"
+                        >
+                          {replySaving[esc.id] ? 'Publication...' : 'Publier la réponse anonyme'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
-          </>
-        )}
+          )}
 
-        {tab === 'acknowledgments' && (
-          <div className="space-y-3">
-            {acknowledgments.length === 0 ? (
-              <div className="bg-white rounded-xl border border-slate-200 p-5 text-sm text-slate-500">
-                Aucun émargement enregistré pour ce tenant.
-              </div>
-            ) : (
-              acknowledgments.map((ack) => (
-                <div
-                  key={ack.id}
-                  className="bg-white rounded-xl border border-slate-200 p-5 space-y-1.5 shadow-sm"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-slate-900">
-                      {ack.full_name || ack.user_email}{' '}
-                      <span className="text-xs font-normal text-slate-500">
-                        ({ack.user_email}{ack.department ? ` • ${ack.department}` : ''})
-                      </span>
-                    </div>
-                    <span className="text-xs text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full font-medium">
-                      Signé le {new Date(ack.acknowledged_at).toLocaleString('fr-FR')}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-700">
-                    Document : <strong>{ack.document_title}</strong> (v{ack.document_version} • {ack.module_code})
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    SHA-256 certifié : <code className="bg-slate-100 px-1.5 py-0.5 rounded">{ack.sha256_hash}</code>
-                  </p>
+          {tab === 'settings' && (
+            <div className="grid md:grid-cols-2 gap-4">
+              <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+                <div className="flex items-center gap-2 font-semibold text-sm">
+                  <Lock className="w-4 h-4 text-indigo-600" /> Socle commun
                 </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {tab === 'friction' && (
-          <div className="space-y-3">
-            {escalations.map((esc) => (
-              <div
-                key={esc.id}
-                className="bg-white rounded-xl border border-slate-200 p-5 space-y-2.5 shadow-sm"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold uppercase text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full">
-                      Réf. #{esc.id.slice(0, 8).toUpperCase()} • {esc.was_escalated ? 'Transmise au référent' : 'Hors périmètre'}
-                    </span>
-                    {esc.referent_acknowledged_at && (
-                      <span className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                        Émargé le {new Date(esc.referent_acknowledged_at).toLocaleString('fr-FR')}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-slate-500">
-                    Canal : {esc.channel} • Confiance : {esc.confidence_score ?? '0.000'} • {new Date(esc.created_at).toLocaleString('fr-FR')}
-                  </span>
-                </div>
-                <p className="text-sm font-medium text-slate-900">« {esc.question_topic} »</p>
-                <p className="text-xs text-slate-500">Module : {esc.module_code || 'non classé'}</p>
-                {esc.referent_answer ? (
-                  <div className="mt-2 rounded-lg bg-emerald-50/70 border border-emerald-200 p-3 space-y-1">
-                    <div className="flex items-center justify-between text-xs font-medium text-emerald-900">
-                      <span>Réponse officielle publiée ({esc.answered_by_role || 'Référent Conformité'})</span>
-                      {esc.answered_at && <span>{new Date(esc.answered_at).toLocaleString('fr-FR')}</span>}
-                    </div>
-                    <p className="text-sm text-slate-800 whitespace-pre-line">{esc.referent_answer}</p>
-                    {esc.referent_answer_sha256 && (
-                      <p className="text-[11px] text-slate-500">
-                        SHA-256 : <code className="bg-white px-1 py-0.5 rounded border border-slate-200">{esc.referent_answer_sha256}</code>
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="pt-2 border-t border-slate-100 space-y-2">
-                    <textarea
-                      rows={2}
-                      value={replyDrafts[esc.id] || ''}
-                      onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [esc.id]: e.target.value }))}
-                      placeholder="Rédiger la réponse officielle du référent conformité..."
-                      className="w-full text-sm border border-slate-200 rounded-lg p-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    />
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => handleReplyEscalation(esc.id)}
-                        disabled={replySaving[esc.id] || !(replyDrafts[esc.id] || '').trim()}
-                        className="text-xs font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white px-3.5 py-1.5 rounded-lg transition"
-                      >
-                        {replySaving[esc.id] ? 'Publication...' : 'Publier la réponse anonyme'}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <label className="flex items-center justify-between text-sm">
+                  <span>Autoriser le socle mutualisé A.C.R.</span>
+                  <input
+                    type="checkbox"
+                    checked={useSharedBase}
+                    onChange={(e) => setUseSharedBase(e.target.checked)}
+                  />
+                </label>
               </div>
-            ))}
-          </div>
-        )}
-
-        {tab === 'settings' && (
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-              <div className="flex items-center gap-2 font-semibold text-sm">
-                <Lock className="w-4 h-4 text-indigo-600" /> Socle commun
+              <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+                <div className="font-semibold text-sm">Authentification</div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="radio" name="auth" checked={authMode === 'sso'} onChange={() => setAuthMode('sso')} />
+                  <span>SSO (Entra ID / Google)</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="auth"
+                    checked={authMode === 'local_email'}
+                    onChange={() => setAuthMode('local_email')}
+                  />
+                  <span>Sans SSO (Email pro + OTP)</span>
+                </label>
               </div>
-              <label className="flex items-center justify-between text-sm">
-                <span>Autoriser le socle mutualisé A.C.R.</span>
-                <input
-                  type="checkbox"
-                  checked={useSharedBase}
-                  onChange={(e) => setUseSharedBase(e.target.checked)}
-                />
-              </label>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-              <div className="font-semibold text-sm">Authentification</div>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="radio" name="auth" checked={authMode === 'sso'} onChange={() => setAuthMode('sso')} />
-                <span>SSO (Entra ID / Google)</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="auth"
-                  checked={authMode === 'local_email'}
-                  onChange={() => setAuthMode('local_email')}
-                />
-                <span>Sans SSO (Email pro + OTP)</span>
-              </label>
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
-  
-    </>);
+          )}
+        </main>
+      </div>
+    </>
+  );
 }
