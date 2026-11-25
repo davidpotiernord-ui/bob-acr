@@ -4,6 +4,9 @@ const { embedText, generateAnswer } = require('../services/llm');
 
 const router = express.Router();
 
+const OUT_OF_SCOPE_PROMPT_ANSWER =
+  "Je n'ai pas de référence documentaire pour répondre précisément à votre question. Souhaitez-vous que je fasse suivre votre question au référent conformité de façon anonyme ?";
+
 function toVector1536Literal(embedding) {
   const targetDim = 1536;
   const arr = Array.isArray(embedding) ? embedding.slice(0, targetDim) : [];
@@ -23,20 +26,22 @@ function formatContextSummary(context) {
 }
 
 function answerIndicatesMissingDocInfo(answerText) {
-  if (!answerText || typeof answerText !== "string") return false;
+  if (!answerText || typeof answerText !== 'string') return false;
   const normalized = answerText
     .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 
   return (
-    normalized.includes("aucun extrait") ||
-    normalized.includes("aucune information") ||
-    normalized.includes("aucune confirmation") ||
-    normalized.includes("escalade requise") ||
+    normalized.includes('aucun extrait') ||
+    normalized.includes('aucune information') ||
+    normalized.includes('aucune confirmation') ||
+    normalized.includes('escalade requise') ||
     normalized.includes("n'ai pas la confirmation") ||
-    normalized.includes("n ai pas la confirmation") ||
-    (normalized.includes("escalader") && normalized.includes("referent"))
+    normalized.includes('n ai pas la confirmation') ||
+    normalized.includes("n'ai pas trouve d'extrait") ||
+    normalized.includes('n ai pas trouve d extrait') ||
+    (normalized.includes('escalader') && normalized.includes('referent'))
   );
 }
 
@@ -100,33 +105,35 @@ router.post('/query', async (req, res) => {
       : 0;
     const hasContext = topChunks.length > 0 && confidenceScore >= 0.78;
 
-    const contextBlock = topChunks
-      .map(
-        (c, idx) =>
-          `[Source ${idx + 1} | titre="${c.document_title || c.module_code || 'Document'}" | version=${c.document_version || '1.0'} | module=${c.module_code} | page=${c.page_number ?? 'n/a'} | score=${Number(c.similarity).toFixed(2)}]\n${c.content}`
-      )
-      .join('\n\n');
+    let rawAnswer = OUT_OF_SCOPE_PROMPT_ANSWER;
+    if (hasContext) {
+      const contextBlock = topChunks
+        .map(
+          (c, idx) =>
+            `[Source ${idx + 1} | titre="${c.document_title || c.module_code || 'Document'}" | version=${c.document_version || '1.0'} | module=${c.module_code} | page=${c.page_number ?? 'n/a'} | score=${Number(c.similarity).toFixed(2)}]\n${c.content}`
+        )
+        .join('\n\n');
 
-    const usageContext = formatContextSummary(context);
+      const usageContext = formatContextSummary(context);
 
-    const systemPrompt = `Tu es BOB, l'assistant souverain de conformité et réglementation (A.C.R.) pour l'entreprise "${req.tenant.name}".
+      const systemPrompt = `Tu es BOB, l'assistant souverain de conformité et réglementation (A.C.R.) pour l'entreprise "${req.tenant.name}".
 Réponds en français, de manière précise, factuelle et structurée, uniquement à partir des extraits fournis.
 Cite explicitement le titre et la version des documents sources utilisés.
-Si l'information n'est pas suffisamment étayée par les extraits, indique clairement que tu n'as pas la confirmation dans les documents disponibles et invite à escalader vers le référent conformité.`;
+Si l'information n'est pas suffisamment étayée par les extraits, indique clairement que tu n'as pas la confirmation dans les documents disponibles.`;
 
-    const userPrompt = hasContext
-      ? `Question : ${cleanQuestion}${usageContext}\n\nExtraits documentaires :\n${contextBlock}`
-      : `Question : ${cleanQuestion}${usageContext}\n\nAucun extrait suffisamment pertinent n'a été trouvé dans la base documentaire.`;
+      const userPrompt = `Question : ${cleanQuestion}${usageContext}\n\nExtraits documentaires :\n${contextBlock}`;
 
-    const answer = await generateAnswer({
-      systemPrompt,
-      userPrompt,
-    });
+      rawAnswer = await generateAnswer({
+        systemPrompt,
+        userPrompt,
+      });
+    }
 
-    const unansweredFlag = !hasContext || answerIndicatesMissingDocInfo(answer);
-    const wasEscalated = unansweredFlag;
-    const escalatedToRole = wasEscalated ? 'compliance_referent' : null;
-    const citedDocumentId = bestChunk ? bestChunk.document_id : null;
+    const unansweredFlag = !hasContext || answerIndicatesMissingDocInfo(rawAnswer);
+    const finalAnswer = unansweredFlag ? OUT_OF_SCOPE_PROMPT_ANSWER : rawAnswer;
+    const wasEscalated = false;
+    const escalatedToRole = null;
+    const citedDocumentId = !unansweredFlag && bestChunk ? bestChunk.document_id : null;
     const resolvedModule =
       (module_code && String(module_code).trim()) ||
       (bestChunk && bestChunk.module_code) ||
@@ -162,36 +169,32 @@ Si l'information n'est pas suffisamment étayée par les extraits, indique clair
 
     await client.query('COMMIT');
 
-    const escalation = wasEscalated
-      ? {
-          role: 'Référent Conformité',
-          contact: process.env.DEFAULT_REFERENT_EMAIL || 'conformite@atelier-sud.fr',
-        }
-      : null;
-
     return res.json({
       status: 'ok',
-      response_status: wasEscalated ? 'ESCALATED_OUT_OF_SCOPE' : 'ANSWERED',
+      response_status: unansweredFlag ? 'OUT_OF_SCOPE_PROMPT' : 'ANSWERED',
       query_id: logRes.rows[0].id,
       tenant: {
         id: req.tenant.id,
         name: req.tenant.name,
       },
-      answer,
+      answer: finalAnswer,
       confidence_score: confidenceScore,
       unanswered_flag: unansweredFlag,
-      was_escalated: wasEscalated,
-      escalation,
-      sources: topChunks.map((c) => ({
-        chunk_id: c.id,
-        document_id: c.document_id,
-        title: c.document_title || c.module_code || 'Document interne',
-        version: c.document_version || '1.0',
-        sha256_hash: c.document_sha256 || null,
-        module_code: c.module_code,
-        page_number: c.page_number,
-        similarity: Number(Number(c.similarity).toFixed(3)),
-      })),
+      can_escalate: unansweredFlag,
+      was_escalated: false,
+      escalation: null,
+      sources: unansweredFlag
+        ? []
+        : topChunks.map((c) => ({
+            chunk_id: c.id,
+            document_id: c.document_id,
+            title: c.document_title || c.module_code || 'Document interne',
+            version: c.document_version || '1.0',
+            sha256_hash: c.document_sha256 || null,
+            module_code: c.module_code,
+            page_number: c.page_number,
+            similarity: Number(Number(c.similarity).toFixed(3)),
+          })),
     });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -199,6 +202,65 @@ Si l'information n'est pas suffisamment étayée par les extraits, indique clair
     return res.status(500).json({
       status: 'error',
       message: 'Failed to process RAG query',
+    });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/escalate', async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    const { query_id: queryId } = req.body || {};
+    if (!queryId || typeof queryId !== 'string') {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Field "query_id" is required',
+      });
+    }
+
+    await client.query('BEGIN');
+    await client.query(`SELECT set_config('app.current_tenant_id', $1, true)`, [
+      req.tenant.id,
+    ]);
+
+    const updateRes = await client.query(
+      `UPDATE query_logs
+       SET was_escalated = TRUE,
+           escalated_to_role = 'compliance_referent'
+       WHERE id = $1
+         AND tenant_id = $2
+       RETURNING id`,
+      [queryId.trim(), req.tenant.id]
+    );
+
+    if (updateRes.rowCount === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        status: 'error',
+        message: 'Query not found for this tenant',
+      });
+    }
+
+    await client.query('COMMIT');
+
+    const reference = updateRes.rows[0].id.slice(0, 8).toUpperCase();
+    return res.json({
+      status: 'ok',
+      was_escalated: true,
+      escalation: {
+        role: 'Référent Conformité',
+        anonymous: true,
+        transmitted: true,
+        reference,
+      },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Erreur POST /api/escalate:', err.message);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to escalate query anonymously',
     });
   } finally {
     client.release();
