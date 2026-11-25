@@ -61,7 +61,7 @@ export default function App() {
   const [content, setContent] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const gov = useReferentGovernance({ documents, acknowledgments, escalations });
+  const gov = useReferentGovernance({ documents, acknowledgments, escalations, apiBase: API_BASE, getAuthHeaders });
 
   const fetchAll = async () => {
     setLoading(true);
@@ -140,7 +140,7 @@ export default function App() {
       const res = await fetch(`${API_BASE}/admin/escalations/${queryId}/reply`, {
         method: 'POST',
         headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ answer: answerText }),
+        body: JSON.stringify({ answer: answerText, answeredBy: gov.activeReferent?.name }),
       });
       const data = await res.json();
       if (res.ok && data.escalation) {
@@ -399,6 +399,7 @@ export default function App() {
                 window.sessionStorage?.setItem('bob_admin_key', adminKeyInput.trim());
               }
               fetchAll();
+              gov.loadReferents();
             }}
             className="rounded bg-sky-600 hover:bg-sky-500 px-3 py-1 font-medium text-white shrink-0"
           >

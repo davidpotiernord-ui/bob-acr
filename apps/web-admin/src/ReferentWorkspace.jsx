@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Users, Layers, Mail } from 'lucide-react';
 
 export const PERIMETERS = [
@@ -17,6 +17,14 @@ export const REFERENT_ROLES = [
 
 export const DEFAULT_REFERENTS = [
   {
+    id: 'ref-3',
+    name: 'Direction Conformité',
+    email: 'conformite@atelier-metal.fr',
+    role: 'admin_conformite',
+    accessLevel: 'read_write',
+    scopes: ['socle_ri', 'rgpd', 'cyber', 'sapin_ii', 'lcb_ft'],
+  },
+  {
     id: 'ref-1',
     name: 'Claire Moreau',
     email: 'claire.moreau@atelier-metal.fr',
@@ -32,14 +40,6 @@ export const DEFAULT_REFERENTS = [
     accessLevel: 'read_write',
     scopes: ['rgpd', 'sapin_ii', 'lcb_ft'],
   },
-  {
-    id: 'ref-3',
-    name: 'Direction Conformité',
-    email: 'conformite@atelier-metal.fr',
-    role: 'admin_conformite',
-    accessLevel: 'read_write',
-    scopes: ['socle_ri', 'rgpd', 'cyber', 'sapin_ii', 'lcb_ft'],
-  },
 ];
 
 export function getScopeLabel(code) {
@@ -50,31 +50,14 @@ export function getScopeShort(code) {
   return PERIMETERS.find((p) => p.code === code)?.short || code || 'Général';
 }
 
-function buildConfirmationMailto(referent) {
-  const accessText =
-    referent.accessLevel === 'read_write'
-      ? 'autorisé(e) en lecture et écriture'
-      : 'autorisé(e) en lecture seule';
-  const scopesText = (referent.scopes || []).map(getScopeLabel).join(', ');
-  const subject = encodeURIComponent('BOB — Confirmation de votre rôle de référent conformité');
-  const body = encodeURIComponent(
-    `Bonjour ${referent.name},\n\n` +
-      `Votre compte référent a bien été configuré sur BOB (Assistant Conformité et Réglementation).\n` +
-      `Vous êtes ${accessText} sur le(s) périmètre(s) suivant(s) : ${scopesText}.\n\n` +
-      `Cordialement,\nLa Gouvernance Conformité`
-  );
-  return `mailto:${encodeURIComponent(referent.email)}?subject=${subject}&body=${body}`;
-}
-
-export function useReferentGovernance({ documents, acknowledgments, escalations }) {
-  const [referents, setReferents] = useState(() => {
-    try {
-      const saved = window.localStorage?.getItem('bob_acr_referents');
-      return saved ? JSON.parse(saved) : DEFAULT_REFERENTS;
-    } catch {
-      return DEFAULT_REFERENTS;
-    }
-  });
+export function useReferentGovernance({
+  documents,
+  acknowledgments,
+  escalations,
+  apiBase,
+  getAuthHeaders,
+}) {
+  const [referents, setReferents] = useState(DEFAULT_REFERENTS);
   const [activeReferentId, setActiveReferentId] = useState('ref-3');
   const [selectedScopeFilter, setSelectedScopeFilter] = useState('all');
   const [publishToKnowledgeBase, setPublishToKnowledgeBase] = useState({});
@@ -84,17 +67,32 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
   const [newRefAccess, setNewRefAccess] = useState('read_write');
   const [newRefScopes, setNewRefScopes] = useState(['socle_ri']);
   const [sendConfirmationMail, setSendConfirmationMail] = useState(true);
-  const [lastCreatedReferent, setLastCreatedReferent] = useState(null);
+  const [mailSending, setMailSending] = useState(false);
   const [refFeedback, setRefFeedback] = useState('');
 
-  useEffect(() => {
+  const loadReferents = useCallback(async () => {
+    if (!apiBase || !getAuthHeaders) return;
     try {
-      window.localStorage?.setItem('bob_acr_referents', JSON.stringify(referents));
+      const res = await fetch(`${apiBase}/admin/referents`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.referents) && data.referents.length > 0) {
+        setReferents(data.referents);
+        setActiveReferentId((prev) =>
+          data.referents.some((r) => r.id === prev) ? prev : data.referents[0].id
+        );
+      }
     } catch {}
-  }, [referents]);
+  }, [apiBase, getAuthHeaders]);
+
+  useEffect(() => {
+    loadReferents();
+  }, [loadReferents]);
 
   const activeReferent =
-    referents.find((r) => r.id === activeReferentId) || referents[0] || DEFAULT_REFERENTS[2];
+    referents.find((r) => r.id === activeReferentId) || referents[0] || DEFAULT_REFERENTS[0];
   const roleMeta =
     REFERENT_ROLES.find((r) => r.id === activeReferent.role) || REFERENT_ROLES[0];
   const canWrite =
@@ -136,7 +134,7 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
     };
   });
 
-  const handleAddReferent = (e) => {
+  const handleAddReferent = async (e) => {
     e.preventDefault();
     setRefFeedback('');
     if (!canWrite) {
@@ -147,62 +145,147 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
       setRefFeedback('Renseignez le nom et l’adresse e-mail du référent.');
       return;
     }
-    const scopesToAssign = newRefScopes.length ? newRefScopes : ['socle_ri'];
-    const created = {
-      id: `ref-${Date.now()}`,
-      name: newRefName.trim(),
-      email: newRefEmail.trim(),
-      role: 'referent_metier',
-      accessLevel: newRefAccess,
-      scopes: scopesToAssign,
-    };
-    setReferents((prev) => [...prev, created]);
-    setLastCreatedReferent(created);
-    setNewRefName('');
-    setNewRefEmail('');
-    setRefFeedback(
-      `${created.name} (${created.email}) ajouté en ${
-        created.accessLevel === 'read_write' ? 'lecture et écriture' : 'lecture seule'
-      } sur : ${scopesToAssign.map(getScopeShort).join(', ')}.`
-    );
 
-    if (sendConfirmationMail && typeof window !== 'undefined') {
-      window.location.href = buildConfirmationMailto(created);
+    const scopesToAssign = newRefScopes.length ? newRefScopes : ['socle_ri'];
+    setMailSending(true);
+    try {
+      const res = await fetch(`${apiBase}/admin/referents`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          name: newRefName.trim(),
+          email: newRefEmail.trim(),
+          role: 'referent_metier',
+          accessLevel: newRefAccess,
+          scopes: scopesToAssign,
+          sendEmail: sendConfirmationMail,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      }
+
+      if (data.referent) {
+        setReferents((prev) => {
+          const filtered = prev.filter((r) => r.email?.toLowerCase() !== data.referent.email?.toLowerCase());
+          return [...filtered, data.referent];
+        });
+      }
+
+      const baseMsg = `${newRefName.trim()} (${newRefEmail.trim()}) enregistré en base (${
+        newRefAccess === 'read_write' ? 'lecture et écriture' : 'lecture seule'
+      } • ${scopesToAssign.map(getScopeShort).join(', ')}).`;
+
+      setNewRefName('');
+      setNewRefEmail('');
+
+      if (!sendConfirmationMail) {
+        setRefFeedback(baseMsg);
+      } else if (data.emailStatus?.sent) {
+        setRefFeedback(`${baseMsg} E-mail de confirmation envoyé.`);
+      } else {
+        setRefFeedback(`${baseMsg} ${data.emailStatus?.reason || ''}`.trim());
+      }
+    } catch (err) {
+      setRefFeedback(`Erreur serveur : ${err.message}`);
+    } finally {
+      setMailSending(false);
     }
   };
 
-  const handleRemoveReferent = (refId) => {
-    if (!canWrite || referents.length <= 1) return;
-    setReferents((prev) => {
-      const next = prev.filter((r) => r.id !== refId);
-      if (activeReferentId === refId && next[0]) {
-        setActiveReferentId(next[0].id);
-      }
-      return next;
-    });
+  const handleResendConfirmation = async (refItem) => {
+    if (!refItem?.email) return;
+    setMailSending(true);
+    try {
+      const res = await fetch(`${apiBase}/admin/referents/notify`, {
+        method: 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          name: refItem.name,
+          email: refItem.email,
+          accessLevel: refItem.accessLevel,
+          scopes: refItem.scopes,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      setRefFeedback(
+        data.sent
+          ? `E-mail de confirmation envoyé à ${refItem.email}.`
+          : `${data.reason || 'Notification traitée'} (${refItem.email}).`
+      );
+    } catch (err) {
+      setRefFeedback(`Échec d'envoi pour ${refItem.email} : ${err.message}`);
+    } finally {
+      setMailSending(false);
+    }
   };
 
-  const updateReferentAccess = (refId, accessLevel) => {
+  const handleRemoveReferent = async (refId) => {
+    if (!canWrite || referents.length <= 1) return;
+    try {
+      const res = await fetch(`${apiBase}/admin/referents/${refId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRefFeedback(data.message || data.error || `HTTP ${res.status}`);
+        return;
+      }
+      setReferents((prev) => {
+        const next = prev.filter((r) => r.id !== refId);
+        if (activeReferentId === refId && next[0]) {
+          setActiveReferentId(next[0].id);
+        }
+        return next;
+      });
+    } catch (err) {
+      setRefFeedback(`Erreur suppression : ${err.message}`);
+    }
+  };
+
+  const updateReferentAccess = async (refId, accessLevel) => {
     if (!canWrite) return;
     setReferents((prev) =>
       prev.map((r) => (r.id === refId ? { ...r, accessLevel } : r))
     );
+    try {
+      await fetch(`${apiBase}/admin/referents/${refId}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ accessLevel }),
+      });
+    } catch {}
   };
 
-  const toggleReferentScope = (refId, scopeCode) => {
+  const toggleReferentScope = async (refId, scopeCode) => {
     if (!canWrite) return;
+    const target = referents.find((r) => r.id === refId);
+    if (!target) return;
+    const exists = target.scopes.includes(scopeCode);
+    const nextScopes = exists
+      ? target.scopes.filter((s) => s !== scopeCode)
+      : [...target.scopes, scopeCode];
+    const finalScopes = nextScopes.length ? nextScopes : [scopeCode];
+
     setReferents((prev) =>
-      prev.map((r) => {
-        if (r.id !== refId) return r;
-        const exists = r.scopes.includes(scopeCode);
-        const nextScopes = exists ? r.scopes.filter((s) => s !== scopeCode) : [...r.scopes, scopeCode];
-        return { ...r, scopes: nextScopes.length ? nextScopes : [scopeCode] };
-      })
+      prev.map((r) => (r.id === refId ? { ...r, scopes: finalScopes } : r))
     );
+
+    try {
+      await fetch(`${apiBase}/admin/referents/${refId}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ scopes: finalScopes }),
+      });
+    } catch {}
   };
 
   return {
     referents,
+    loadReferents,
     activeReferent,
     activeReferentId,
     setActiveReferentId,
@@ -226,9 +309,10 @@ export function useReferentGovernance({ documents, acknowledgments, escalations 
     setNewRefScopes,
     sendConfirmationMail,
     setSendConfirmationMail,
-    lastCreatedReferent,
+    mailSending,
     refFeedback,
     handleAddReferent,
+    handleResendConfirmation,
     handleRemoveReferent,
     updateReferentAccess,
     toggleReferentScope,
@@ -464,7 +548,7 @@ export function ReferentTabContent({
 
       <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-5 shadow-sm">
         <h3 className="font-semibold text-sm text-slate-900">
-          Attribution des rôles &amp; périmètres référents
+          Attribution des rôles &amp; périmètres référents (PostgreSQL)
         </h3>
 
         {gov.roleMeta.canWrite && (
@@ -541,24 +625,16 @@ export function ReferentTabContent({
 
               <button
                 type="submit"
-                className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg px-4 py-2"
+                disabled={gov.mailSending}
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium rounded-lg px-4 py-2"
               >
-                Enregistrer l'attribution
+                {gov.mailSending ? 'Enregistrement et envoi...' : "Enregistrer l'attribution"}
               </button>
             </div>
 
             {gov.refFeedback && (
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-indigo-900 bg-indigo-100/80 border border-indigo-200 rounded-lg px-3 py-2">
-                <span>{gov.refFeedback}</span>
-                {gov.lastCreatedReferent?.email && (
-                  <a
-                    href={buildConfirmationMailto(gov.lastCreatedReferent)}
-                    className="inline-flex items-center gap-1 underline text-indigo-800 hover:text-indigo-950"
-                  >
-                    <Mail className="w-3.5 h-3.5" />
-                    Ouvrir le mail ({gov.lastCreatedReferent.email})
-                  </a>
-                )}
+              <div className="text-xs font-medium text-indigo-900 bg-indigo-100/80 border border-indigo-200 rounded-lg px-3 py-2">
+                {gov.refFeedback}
               </div>
             )}
           </form>
@@ -581,14 +657,16 @@ export function ReferentTabContent({
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    {ref.email && (
-                      <a
-                        href={buildConfirmationMailto(ref)}
+                    {ref.email && gov.roleMeta.canWrite && (
+                      <button
+                        type="button"
+                        disabled={gov.mailSending}
+                        onClick={() => gov.handleResendConfirmation(ref)}
                         className="text-[11px] text-indigo-700 hover:text-indigo-900 px-2 py-1 rounded border border-indigo-200 bg-white inline-flex items-center gap-1"
                       >
                         <Mail className="w-3 h-3" />
-                        Mail confirmation
-                      </a>
+                        Envoyer confirmation
+                      </button>
                     )}
                     <select
                       value={isRW ? 'read_write' : 'read_only'}
