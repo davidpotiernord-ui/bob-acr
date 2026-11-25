@@ -186,7 +186,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_BASE}/admin/escalations/${queryId}/reply`, {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ answer: answerText }),
       });
       const data = await res.json();
@@ -478,16 +478,16 @@ export default function App() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold uppercase text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full">
-                      Réf. #${esc.id.slice(0, 8).toUpperCase()} • ${esc.was_escalated ? 'Transmise au référent' : 'Hors périmètre'}
+                      Réf. #{esc.id.slice(0, 8).toUpperCase()} • {esc.was_escalated ? 'Transmise au référent' : 'Hors périmètre'}
                     </span>
                     {esc.referent_acknowledged_at && (
                       <span className="text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                        Émargé le ${new Date(esc.referent_acknowledged_at).toLocaleString('fr-FR')}
+                        Émargé le {new Date(esc.referent_acknowledged_at).toLocaleString('fr-FR')}
                       </span>
                     )}
                   </div>
                   <span className="text-xs text-slate-500">
-                    Canal : ${esc.channel} • Confiance : ${esc.confidence_score ?? '0.000'} • ${new Date(esc.created_at).toLocaleString('fr-FR')}
+                    Canal : {esc.channel} • Confiance : {esc.confidence_score ?? '0.000'} • {new Date(esc.created_at).toLocaleString('fr-FR')}
                   </span>
                 </div>
                 <p className="text-sm font-medium text-slate-900">« {esc.question_topic} »</p>
