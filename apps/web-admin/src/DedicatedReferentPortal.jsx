@@ -40,7 +40,7 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`${apiBase}/api/referent/me`, { headers });
+      const res = await fetch(`${apiBase}/referent/me`, { headers });
       const json = await res.json();
       if (!res.ok) throw new Error(json.message || "Erreur chargement");
       setData(json);
@@ -62,7 +62,7 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
     setSavingId(queryId);
     setFeedback("");
     try {
-      const res = await fetch(`${apiBase}/api/referent/escalations/${queryId}/reply`, {
+      const res = await fetch(`${apiBase}/referent/escalations/${queryId}/reply`, {
         method: "POST",
         headers,
         body: JSON.stringify({ answer }),
@@ -86,7 +86,7 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
     setError("");
     setFeedback("");
     try {
-      const res = await fetch(`${apiBase}/api/referent/pushes`, {
+      const res = await fetch(`${apiBase}/referent/pushes`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -118,6 +118,23 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
   if (loading && !data) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-600">Chargement espace référent...</div>;
   if (error && !data) {
     return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="max-w-md w-full bg-white border border-red-200 rounded-xl p-5 space-y-3 text-center">
+          <p className="font-semibold text-red-700">Accès espace référent impossible</p>
+          <p className="text-sm text-slate-600">{error}</p>
+          <button type="button" onClick={loadPortal} className="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm">
+            Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
+  if (!data) return null;
+  const ref = data.referent || { name: "Référent", scopes: [], canWrite: false, canPush: false };
+  const badge = ACCESS_BADGES[ref.accessLevel] || ACCESS_BADGES.read_only;
+  const escs = data.escalations || [];
+  const docs = data.documents || [];
+  return (
   <div className="min-h-screen bg-slate-50 p-6">
     <div className="max-w-5xl mx-auto space-y-4">
       <div className="bg-white border rounded-xl p-4 flex justify-between items-center">
@@ -223,6 +240,5 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
       )}
     </div>
   </div>
-);
-}
+  );
 }
