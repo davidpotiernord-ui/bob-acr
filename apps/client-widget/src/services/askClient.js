@@ -81,10 +81,8 @@ export const askBob = ({ question, channel = 'chrome_extension' }) =>
 export const escalateQuery = ({ queryId }) =>
   postJson('/api/escalate', { query_id: queryId });
 
-export const fetchEscalationsStatus = (queryIds) =>
-  Array.isArray(queryIds) && queryIds.length > 0
-    ? postJson('/api/escalations/status', { query_ids: queryIds })
-    : Promise.resolve({ status: 'ok', items: [] });
+export const fetchEscalationsStatus = (queryIds = []) =>
+  postJson('/api/escalations/status', { query_ids: Array.isArray(queryIds) ? queryIds : [] });
 
 export const acknowledgeEscalationAnswer = ({ queryId }) =>
   postJson(`/api/escalations/${queryId}/acknowledge`, {});

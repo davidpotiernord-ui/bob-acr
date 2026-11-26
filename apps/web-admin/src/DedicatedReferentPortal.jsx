@@ -134,6 +134,7 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
   const badge = ACCESS_BADGES[ref.accessLevel] || ACCESS_BADGES.read_only;
   const escs = data.escalations || [];
   const docs = data.documents || [];
+  const acks = Array.isArray(data.acknowledgments) ? data.acknowledgments : [];
   const pushes = data.pushes || [];
   const pushResponses = data.push_responses || [];
   return (
@@ -157,9 +158,9 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
       </div>
       {activeTab === "escalations" && escs.map((e) => (
         <div key={e.id} className="bg-white border rounded-xl p-4 space-y-2">
-          <p className="font-medium">{e.question_topic || "Escalade"}</p>
+          <div className="flex justify-between items-start gap-2"><p className="font-medium">{e.question_topic || "Escalade"}</p><span className="text-xs text-slate-500 shrink-0">Reçue le {e.created_at ? new Date(e.created_at).toLocaleString("fr-FR") : "—"}</span></div>
           {e.referent_answer ? (
-            <p className="text-sm text-emerald-700">{e.referent_answer}</p>
+            <div className="space-y-1"><p className="text-sm text-emerald-700">{e.referent_answer}</p><p className="text-[11px] text-slate-500">Répondu le {e.answered_at ? new Date(e.answered_at).toLocaleString("fr-FR") : "—"}{e.referent_answer_sha256 ? ` • SHA-256 : ${e.referent_answer_sha256}` : ""}</p></div>
           ) : ref.canWrite ? (
             <div className="space-y-2">
               <textarea

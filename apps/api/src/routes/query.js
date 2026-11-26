@@ -372,7 +372,7 @@ router.post("/escalations/status", async (req, res) => {
          created_at
        FROM query_logs
        WHERE tenant_id = $1
-         AND id = ANY($2::uuid[])
+         AND (id = ANY($2::uuid[]) OR (was_escalated = TRUE AND referent_answer IS NOT NULL))
        ORDER BY created_at DESC`,
       [req.tenant.id, queryIds]
     );
