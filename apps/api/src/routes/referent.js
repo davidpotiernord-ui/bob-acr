@@ -26,6 +26,15 @@ function ensureReferentAndPushSchema() {
       ALTER TABLE tenant_referents ADD COLUMN IF NOT EXISTS access_token VARCHAR(96);
       UPDATE tenant_referents SET access_token = encode(gen_random_bytes(24), 'hex') WHERE access_token IS NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_referents_token ON tenant_referents (access_token);
+      ALTER TABLE documents ADD COLUMN IF NOT EXISTS module_code VARCHAR(40) DEFAULT 'socle_ri';
+      ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS module_code VARCHAR(40) DEFAULT 'socle_ri';
+      ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS question_topic TEXT;
+      ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS unanswered_flag BOOLEAN DEFAULT false;
+      ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS was_escalated BOOLEAN DEFAULT false;
+      ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS referent_answer TEXT;
+      ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS referent_answer_sha256 VARCHAR(64);
+      ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS answered_by_role VARCHAR(40);
+      ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS answered_at TIMESTAMPTZ;
       CREATE TABLE IF NOT EXISTS referent_pushes (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -96,7 +105,7 @@ router.get("/referent/me", referentTokenAuth, async (req, res) => {
     return res.json({ status: "ok", tenant: req.tenant, referent: req.referent, documents: docsRes.rows, acknowledgments: acksRes.rows, escalations: escsRes.rows, pushes: pushesRes.rows });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
-    return res.status(500).json({ status: "error", message: "Erreur chargement espace référent." });
+    console.error("Erreur /referent/me:", err.message); return res.status(500).json({ status: "error", message: "Erreur chargement espace référent.", detail: err.message });
   } finally { client.release(); }
 });
 
