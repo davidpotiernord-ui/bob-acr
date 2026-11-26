@@ -91,6 +91,15 @@ async function refreshBobPushBadge() {
     }
 
     const total = pushCount + unreadRepliesCount;
+    await chrome.storage?.local?.set({ bobBadgeCount: total }).catch(() => {});
+    chrome.tabs?.query?.({ url: ["http://*/*", "https://*/*"] }, (tabs) => {
+      for (const tab of tabs || []) {
+        if (typeof tab.id === "number") {
+          chrome.tabs.sendMessage(tab.id, { type: "BOB_SET_OVERLAY_BADGE", count: total }).catch(() => {});
+        }
+      }
+    });
+    await chrome.storage?.local?.set({ bobBadgeCount: total }).catch(() => {});
     await chrome.action.setBadgeText({ text: total > 0 ? String(total) : "" });
     if (total > 0 && chrome.action.setBadgeBackgroundColor) {
       await chrome.action.setBadgeBackgroundColor({
@@ -161,4 +170,15 @@ chrome.alarms?.onAlarm.addListener((alarm) => {
 });
 chrome.storage?.onChanged?.addListener(() => {
   refreshBobPushBadge();
+});
+
+chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === "BOB_GET_BADGE") {
+    Promise.resolve(refreshBobPushBadge()).then(() => {
+      chrome.storage?.local?.get(["bobBadgeCount"], (res) => {
+        sendResponse({ count: Number(res?.bobBadgeCount) || 0 });
+      });
+    });
+    return true;
+  }
 });

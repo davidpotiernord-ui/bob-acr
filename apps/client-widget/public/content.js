@@ -71,8 +71,36 @@
       panel.style.display = "none";
     });
 
+    setInterval(() => {
+
+
+      try {
+
+
+        chrome.runtime?.sendMessage?.({ type: "BOB_GET_BADGE" }, (res) => {
+
+
+          if (chrome.runtime?.lastError) return;
+
+
+          if (typeof res?.count === "number") setOverlayBadge(res.count);
+
+
+        });
+
+
+      } catch {}
+
+
+    }, 5000);
+
+
     btn.addEventListener("click", () => {
-      panel.style.display = panel.style.display === "none" ? "block" : "none";
+      const opening = panel.style.display === "none";
+      panel.style.display = opening ? "block" : "none";
+      if (opening && iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ type: "BOB_PANEL_OPENED" }, "*");
+      }
     });
 
     document.addEventListener("keydown", (e) => {

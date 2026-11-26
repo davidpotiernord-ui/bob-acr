@@ -181,6 +181,10 @@ try {
     };
 
     const onWindowMessage = (event) => {
+      if (event.data?.type === "BOB_PANEL_OPENED") {
+        loadPendingPushes();
+        syncTrackedStatuses();
+      }
       if (event.data?.type === "BOB_SELECTION_PAYLOAD" && event.data?.payload?.text) {
         loadExcerpt(event.data.payload);
         window.chrome?.storage?.local?.remove("bobPendingSelection").catch(() => {});
@@ -193,6 +197,8 @@ try {
     }
 
     return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("message", onWindowMessage);
       if (window.chrome?.storage?.onChanged) {
         chrome.storage.onChanged.removeListener(onStorageChanged);
