@@ -25,9 +25,29 @@
 
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = "BOB Conformité";
-    btn.style.cssText =
-      "background:#4f46e5;color:#fff;border:none;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(15,23,42,0.25);cursor:pointer;";
+    btn.style.position = "relative";
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = "BOB Conformité";
+    const badgeEl = document.createElement("span");
+    badgeEl.id = "bob-acr-overlay-badge";
+    badgeEl.style.cssText = "display:none;position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#e11d48;color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 2px 8px rgba(15,23,42,0.35);pointer-events:none;";
+    btn.appendChild(labelSpan);
+    btn.appendChild(badgeEl);
+    const setOverlayBadge = (count) => {
+      const n = Number(count) || 0;
+      badgeEl.textContent = n > 0 ? String(n) : "";
+      badgeEl.style.display = n > 0 ? "inline-block" : "none";
+    };
+    chrome.storage?.local?.get(["bobBadgeCount"], (res) => {
+      if (typeof res?.bobBadgeCount === "number") setOverlayBadge(res.bobBadgeCount);
+    });
+    chrome.storage?.onChanged?.addListener((changes) => {
+      if (changes.bobBadgeCount) setOverlayBadge(changes.bobBadgeCount.newValue);
+    });
+    chrome.runtime?.onMessage?.addListener((msg) => {
+      if (msg?.type === "BOB_SET_OVERLAY_BADGE") setOverlayBadge(msg.count);
+    });
+    btn.style.cssText = "background:#4f46e5;color:#fff;border:none;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:600;box-shadow:0 8px 24px rgba(15,23,42,0.25);cursor:pointer;position:relative;display:inline-flex;align-items:center;gap:6px;";
 
     const panel = document.createElement("div");
     panel.id = PANEL_ID;

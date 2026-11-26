@@ -1,4 +1,7 @@
 const MENU_ID = "bob-acr-selection-menu";
+const BOB_DEFAULT_API = "https://bob-acr-api.osc-fr1.scalingo.io";
+const BOB_DEFAULT_API_KEY = "bob_client_aedde88bc44f30df450d3ea04f595c8c8dd416282ce4d8d0";
+const BOB_DEFAULT_USER_EMAIL = "salarie.demo@atelier-sud.fr";
 
 function ensureContextMenu() {
   if (!chrome.contextMenus) return;
@@ -25,6 +28,78 @@ async function reinjectContentScripts() {
   } catch {}
 }
 
+async function readExtensionConfig() {
+  const localCfg = await new Promise((resolve) => {
+    if (chrome.storage?.local) {
+      chrome.storage.local.get(null, (items) => resolve(items || {}));
+    } else resolve({});
+  });
+  const managedCfg = await new Promise((resolve) => {
+    if (chrome.storage?.managed) {
+      chrome.storage.managed.get(["api_key", "api_url", "user_email"], (items) => resolve(items || {}));
+    } else resolve({});
+  });
+  const apiUrl = String(
+    managedCfg.api_url || localCfg.bob_api_url || localCfg.api_url || BOB_DEFAULT_API
+  ).replace(/\/+$/, "");
+  const apiKey = String(
+    managedCfg.api_key || localCfg.bob_api_key || localCfg.api_key || BOB_DEFAULT_API_KEY
+  );
+  const userEmail = String(
+    managedCfg.user_email || localCfg.bob_user_email || localCfg.user_email || BOB_DEFAULT_USER_EMAIL
+  );
+  const trackedRaw =
+    localCfg.bobTrackedEscalations ||
+    localCfg.bob_tracked_escalations ||
+    localCfg.trackedEscalations ||
+    [];
+  const queryIds = Array.isArray(trackedRaw)
+    ? trackedRaw.map((i) => (typeof i === "string" ? i : i?.query_id || i?.id)).filter(Boolean)
+    : [];
+  return { apiUrl, apiKey, userEmail, queryIds };
+}
+
+async function refreshBobPushBadge() {
+  try {
+    if (!chrome.action?.setBadgeText) return;
+    const { apiUrl, apiKey, userEmail, queryIds } = await readExtensionConfig();
+    const headers = {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+    };
+
+    const [pushRes, escRes] = await Promise.all([
+      fetch(`${apiUrl}/api/widget/pushes/pending?user=${encodeURIComponent(userEmail)}`, { headers }).catch(() => null),
+      fetch(`${apiUrl}/api/escalations/status`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query_ids: queryIds }),
+      }).catch(() => null),
+    ]);
+
+    let pushCount = 0;
+    if (pushRes && pushRes.ok) {
+      const pData = await pushRes.json().catch(() => ({}));
+      pushCount = Number(pData.unreadCount ?? (Array.isArray(pData.pushes) ? pData.pushes.length : 0)) || 0;
+    }
+
+    let unreadRepliesCount = 0;
+    if (escRes && escRes.ok) {
+      const eData = await escRes.json().catch(() => ({}));
+      const items = Array.isArray(eData.items) ? eData.items : [];
+      unreadRepliesCount = items.filter((i) => i.referent_answer && !i.referent_acknowledged_at).length;
+    }
+
+    const total = pushCount + unreadRepliesCount;
+    await chrome.action.setBadgeText({ text: total > 0 ? String(total) : "" });
+    if (total > 0 && chrome.action.setBadgeBackgroundColor) {
+      await chrome.action.setBadgeBackgroundColor({
+        color: unreadRepliesCount > 0 ? "#059669" : "#e11d48",
+      });
+    }
+  } catch {}
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   ensureContextMenu();
   reinjectContentScripts();
@@ -33,10 +108,14 @@ chrome.runtime.onInstalled.addListener(() => {
       .setPanelBehavior({ openPanelOnActionClick: true })
       .catch((err) => console.error("Erreur setPanelBehavior:", err));
   }
+  chrome.alarms?.create("bob-poll-pushes", { periodInMinutes: 1 });
+  refreshBobPushBadge();
 });
 
 chrome.runtime.onStartup?.addListener(() => {
   ensureContextMenu();
+  chrome.alarms?.create("bob-poll-pushes", { periodInMinutes: 1 });
+  refreshBobPushBadge();
 });
 
 chrome.contextMenus?.onClicked.addListener(async (info, tab) => {
@@ -76,34 +155,10 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-const BOB_DEFAULT_API = "https://bob-acr-api.osc-fr1.scalingo.io";
-
-async function refreshBobPushBadge() {
-  try {
-    const cfg = await new Promise((resolve) => {
-      if (chrome.storage?.managed) {
-        chrome.storage.managed.get(["api_key", "api_url", "user_email"], (items) => resolve(items || {}));
-      } else resolve({});
-    });
-    const baseUrl = (cfg.api_url || BOB_DEFAULT_API).replace(/\/+$/, "");
-    const userEmail = cfg.user_email || "salarie.demo@atelier-sud.fr";
-    const headers = cfg.api_key ? { Authorization: `Bearer ${cfg.api_key}` } : {};
-    const res = await fetch(`${baseUrl}/api/widget/pushes/pending?user=${encodeURIComponent(userEmail)}`, { headers });
-    if (!res.ok) return;
-    const data = await res.json();
-    const count = Number(data.unreadCount || (data.pushes ? data.pushes.length : 0));
-    if (chrome.action?.setBadgeText) {
-      await chrome.action.setBadgeText({ text: count > 0 ? String(count) : "" });
-      if (count > 0 && chrome.action.setBadgeBackgroundColor) {
-        await chrome.action.setBadgeBackgroundColor({ color: "#e11d48" });
-      }
-    }
-  } catch {}
-}
-
 chrome.alarms?.create("bob-poll-pushes", { periodInMinutes: 1 });
 chrome.alarms?.onAlarm.addListener((alarm) => {
   if (alarm.name === "bob-poll-pushes") refreshBobPushBadge();
 });
-chrome.runtime.onInstalled.addListener(() => refreshBobPushBadge());
-chrome.runtime.onStartup?.addListener(() => refreshBobPushBadge());
+chrome.storage?.onChanged?.addListener(() => {
+  refreshBobPushBadge();
+});

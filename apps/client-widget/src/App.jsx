@@ -83,36 +83,34 @@ export default function App() {
   ]);
 
   const syncTrackedStatuses = async (baseList) => {
-    const list = baseList ?? (await loadTrackedEscalations());
-    if (!list.length) {
-      setTrackedItems([]);
-      return;
-    }
-    setSyncingInbox(true);
-    try {
-      const res = await fetchEscalationsStatus(list.map((i) => i.query_id));
-      const byId = new Map((res.items || []).map((item) => [item.query_id, item]));
-      setTrackedItems(
-        list.map((localItem) => {
-          const remote = byId.get(localItem.query_id);
-          return remote ? { ...localItem, ...remote } : localItem;
-        })
-      );
-    } catch {
-      setTrackedItems(list);
-    } finally {
-      setSyncingInbox(false);
-    }
-  };
+const list = baseList ?? (await loadTrackedEscalations());
+setSyncingInbox(true);
+try {
+  const res = await fetchEscalationsStatus(list.map((i) => i.query_id));
+  const remoteItems = Array.isArray(res.items) ? res.items : [];
+  const localById = new Map(list.map((item) => [item.query_id, item]));
+  const merged = new Map();
+  for (const localItem of list) {
+    merged.set(localItem.query_id, localItem);
+  }
+  for (const remote of remoteItems) {
+    const prev = localById.get(remote.query_id) || {};
+    merged.set(remote.query_id, { ...prev, ...remote });
+  }
+  setTrackedItems(Array.from(merged.values()));
+} catch {
+  setTrackedItems(list);
+} finally {
+  setSyncingInbox(false);
+}
+};
 
   const syncPendingPushes = async () => {
     try {
       const res = await fetchPendingPushes();
       const list = Array.isArray(res.pushes) ? res.pushes : [];
       setPendingPushes(list);
-      if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
-        chrome.action.setBadgeText({ text: list.length > 0 ? String(list.length) : "" }).catch(() => {});
-      }
+      
     } catch {}
   };
 
@@ -203,8 +201,23 @@ export default function App() {
   }, []);
 
   const unreadAnswersCount = trackedItems.filter(
-    (item) => item.referent_answer && !item.referent_acknowledged_at
-  ).length;
+(item) => item.referent_answer && !item.referent_acknowledged_at
+).length;
+const totalBadgeCount = pendingPushes.length + unreadAnswersCount;
+
+useEffect(() => {
+  if (typeof chrome !== "undefined" && chrome.storage?.local?.set) {
+    chrome.storage.local.set({ bobBadgeCount: totalBadgeCount }).catch(() => {});
+  }
+  if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
+  chrome.action.setBadgeText({ text: totalBadgeCount > 0 ? String(totalBadgeCount) : "" }).catch(() => {});
+  if (totalBadgeCount > 0 && chrome.action?.setBadgeBackgroundColor) {
+    chrome.action.setBadgeBackgroundColor({
+      color: unreadAnswersCount > 0 ? "#059669" : "#e11d48",
+    }).catch(() => {});
+  }
+}
+}, [totalBadgeCount, unreadAnswersCount]);
 
   const handleSend = async (textToSend) => {
     const basePrompt = (textToSend ?? question).trim();

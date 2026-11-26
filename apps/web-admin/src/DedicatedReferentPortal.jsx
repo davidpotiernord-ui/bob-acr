@@ -257,20 +257,104 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
         <div className="space-y-4">
       <div className="bg-white border rounded-xl p-4 space-y-3">
         <h3 className="font-semibold text-sm">Pushes diffusés ({pushes.length})</h3>
-        {pushes.map((p) => (
-          <div key={p.id} className="border rounded-lg p-3 text-sm flex justify-between items-start gap-3">
-            <div>
-              <p className="font-medium">{p.title} <span className="text-xs text-slate-400">({p.push_type} • {p.module_code})</span></p>
-              <p className="text-xs text-slate-600">{p.body}</p>
-            </div>
-            <div className="text-right text-xs shrink-0">
-              <p className="font-semibold text-slate-800">{p.total_responses || 0} réponse(s)</p>
-              {p.push_type === "quiz" && (
-                <p className="text-slate-500">✓ {p.correct_responses || 0} / ✗ {p.wrong_responses || 0}</p>
+        {pushes.map((p) => {
+          const opts = Array.isArray(p.options_json) ? p.options_json : [];
+          const relatedResponses = pushResponses.filter((r) => r.push_id === p.id);
+          return (
+            <div key={p.id} className="border rounded-lg p-3.5 text-sm space-y-2.5 bg-slate-50/40">
+              <div className="flex justify-between items-start gap-3">
+                <div className="space-y-0.5">
+                  <p className="font-semibold text-slate-900">
+                    {p.title}{" "}
+                    <span className="text-xs font-normal text-slate-500">
+                      ({p.push_type} • {p.module_code}{p.referent_name ? ` • ${p.referent_name}` : ""})
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Publié le {p.created_at ? new Date(p.created_at).toLocaleString("fr-FR") : "—"}
+                  </p>
+                </div>
+                <div className="text-right text-xs shrink-0">
+                  <p className="font-semibold text-slate-800">{p.total_responses || 0} réponse(s)</p>
+                  {p.push_type === "quiz" && (
+                    <p className="text-slate-500">✓ {p.correct_responses || 0} / ✗ {p.wrong_responses || 0}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white border rounded-md p-2.5 space-y-2">
+                <p className="text-xs font-medium text-slate-800 whitespace-pre-line">{p.body}</p>
+                {p.push_type === "quiz" && (
+                  <div className="space-y-1 pt-1 border-t border-slate-100">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                      Réponses suggérées & bonne réponse
+                    </p>
+                    {opts.length > 0 ? (
+                      <ul className="space-y-1">
+                        {opts.map((opt, idx) => {
+                          const isExpected =
+                            p.correct_option &&
+                            String(opt).trim().toLowerCase() === String(p.correct_option).trim().toLowerCase();
+                          return (
+                            <li
+                              key={idx}
+                              className={`text-xs px-2.5 py-1 rounded border flex items-center justify-between gap-2 ${
+                                isExpected
+                                  ? "bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold"
+                                  : "bg-slate-50 border-slate-200 text-slate-700"
+                              }`}
+                            >
+                              <span>{opt}</span>
+                              {isExpected && (
+                                <span className="text-[11px] font-semibold text-emerald-700 shrink-0">
+                                  ✓ Bonne réponse
+                                </span>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
+                    {p.correct_option && (
+                      <p className="text-xs text-emerald-800 font-medium pt-0.5">
+                        Bonne réponse attendue : {p.correct_option}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {relatedResponses.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">
+                    Trace des réponses ({relatedResponses.length})
+                  </p>
+                  <div className="space-y-1">
+                    {relatedResponses.map((r) => (
+                      <div key={r.id} className="bg-white border rounded p-2 text-xs space-y-0.5">
+                        <div className="flex justify-between gap-2">
+                          <span className="font-semibold text-slate-800">{r.user_identifier}</span>
+                          <span className="text-slate-500">
+                            {r.responded_at ? new Date(r.responded_at).toLocaleString("fr-FR") : ""}
+                          </span>
+                        </div>
+                        <p className="text-slate-700">
+                          Choix : <strong>{r.selected_option || r.free_text || "ACK"}</strong>
+                          {r.is_correct === true ? " (✓ Correct)" : r.is_correct === false ? " (✗ Incorrect)" : ""}
+                        </p>
+                        {r.sha256_proof && (
+                          <p className="font-mono text-[11px] text-slate-500 break-all">
+                            SHA-256 : {r.sha256_proof}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="bg-white border rounded-xl p-4 space-y-2">
         <h3 className="font-semibold text-sm">Réponses & preuves SHA-256 ({pushResponses.length})</h3>
