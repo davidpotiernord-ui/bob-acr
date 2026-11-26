@@ -99,3 +99,5 @@ router.get("/referent/me", referentTokenAuth, async (req, res) => {
     return res.status(500).json({ status: "error", message: "Erreur chargement espace référent." });
   } finally { client.release(); }
 });
+
+module.exports = router;
