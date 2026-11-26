@@ -175,15 +175,24 @@ router.get("/referent/pushes/active", referentTokenAuth, async (req, res) => {
 
 
 async function resolveWidgetTenant(req) {
-  if (req.tenant && req.tenant.id) return req.tenant;
-  const auth = typeof req.headers.authorization === "string" ? req.headers.authorization.trim() : "";
-  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
-  if (bearer) {
-    const tRes = await db.query("SELECT id, name FROM tenants WHERE api_key = $1 LIMIT 1", [bearer]);
-    if (tRes.rows[0]) return tRes.rows[0];
+  try {
+    if (req.tenant && req.tenant.id) return req.tenant;
+    const auth = typeof req.headers.authorization === "string" ? req.headers.authorization.trim() : "";
+    const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+    if (bearer) {
+      const hash = crypto.createHash("sha256").update(bearer).digest("hex");
+      const tRes = await db.query(
+        "SELECT id, name FROM tenants WHERE api_key_hash = $1 OR id::text = $2 LIMIT 1",
+        [hash, bearer]
+      ).catch(() => ({ rows: [] }));
+      if (tRes.rows[0]) return tRes.rows[0];
+    }
+    const fallback = await db.query("SELECT id, name FROM tenants WHERE id = '11111111-1111-1111-1111-111111111111' LIMIT 1");
+    return fallback.rows[0] || null;
+  } catch (err) {
+    console.error("Erreur resolveWidgetTenant:", err.message);
+    return null;
   }
-  const fallback = await db.query("SELECT id, name FROM tenants WHERE id = '11111111-1111-1111-1111-111111111111' LIMIT 1");
-  return fallback.rows[0] || null;
 }
 
 router.get("/widget/pushes/pending", async (req, res) => {
