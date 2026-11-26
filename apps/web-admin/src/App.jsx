@@ -47,6 +47,7 @@ export default function App() {
   const [documents, setDocuments] = useState([]);
   const [acknowledgments, setAcknowledgments] = useState([]);
   const [escalations, setEscalations] = useState([]);
+  const [pushResponses, setPushResponses] = useState([]);
   const [replyDrafts, setReplyDrafts] = useState({});
   const [replySaving, setReplySaving] = useState({});
   const [loading, setLoading] = useState(true);
@@ -71,11 +72,13 @@ export default function App() {
     setErrorMsg('');
     const headers = getAuthHeaders();
     try {
-      const [ovRes, docRes, ackRes, escRes] = await Promise.all([
+      const [ovRes, docRes, ackRes, escRes, pushRespRes] = await Promise.all([
         fetch(`${API_BASE}/admin/overview`, { headers }),
         fetch(`${API_BASE}/documents`, { headers }),
         fetch(`${API_BASE}/acknowledgments`, { headers }),
         fetch(`${API_BASE}/admin/escalations`, { headers }),
+        fetch(`${API_BASE}/admin/pushes/responses`, { headers }),,
+        fetch(`${API_BASE}/admin/pushes/responses`, { headers }),
       ]);
 
       if (!ovRes.ok || !docRes.ok || !ackRes.ok || !escRes.ok) {
@@ -93,6 +96,10 @@ export default function App() {
       setDocuments(docData.documents || []);
       setAcknowledgments(ackData.acknowledgments || []);
       setEscalations(escData.escalations || []);
+      if (pushRespRes && pushRespRes.ok) {
+        const prData = await pushRespRes.json();
+        setPushResponses(Array.isArray(prData.responses) ? prData.responses : []);
+      }
     } catch (err) {
       setErrorMsg(`Synchronisation API : ${err.message}`);
     } finally {
@@ -837,7 +844,23 @@ export default function App() {
             </div>
           )}
         </main>
-      </div>
+      
+    <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-2 mt-6">
+      <h2 className="font-semibold text-sm text-slate-900">Remontée des réponses Pushes Référent & Preuves SHA-256 ({pushResponses.length})</h2>
+      {pushResponses.length === 0 ? (
+        <p className="text-xs text-slate-500">Aucune réponse push enregistrée sur ce tenant.</p>
+      ) : pushResponses.map((r) => (
+        <div key={r.id} className="border border-slate-100 rounded-lg p-2.5 text-xs space-y-1">
+          <div className="flex justify-between">
+            <span className="font-semibold text-slate-800">{r.user_identifier} • {r.push_title}</span>
+            <span className="text-slate-500">{new Date(r.responded_at).toLocaleString("fr-FR")}</span>
+          </div>
+          <p className="text-slate-700">Réponse : <strong>{r.selected_option || r.free_text || "ACK"}</strong> — Référent : {r.referent_name}</p>
+          <p className="font-mono text-[11px] text-slate-500 break-all">SHA-256 : {r.sha256_proof}</p>
+        </div>
+      ))}
+    </div>
+</div>
     </>
   );
 }

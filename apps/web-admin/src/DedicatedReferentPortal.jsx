@@ -134,6 +134,8 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
   const badge = ACCESS_BADGES[ref.accessLevel] || ACCESS_BADGES.read_only;
   const escs = data.escalations || [];
   const docs = data.documents || [];
+  const pushes = data.pushes || [];
+  const pushResponses = data.push_responses || [];
   return (
   <div className="min-h-screen bg-slate-50 p-6">
     <div className="max-w-5xl mx-auto space-y-4">
@@ -184,6 +186,18 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
           ))}
         </div>
       )}
+      
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl text-sm font-medium">
+          {error}
+        </div>
+      )}
+      {feedback && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2.5 rounded-xl text-sm font-medium">
+          {feedback}
+        </div>
+      )}
+
       {activeTab === "acknowledgments" && (
         <div className="bg-white border rounded-xl p-4 space-y-2">
           {acks.map((a) => (
@@ -233,10 +247,46 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
               />
             </div>
           )}
-          <button type="submit" className="px-4 py-2 bg-emerald-600 text-white rounded text-sm">
-            Diffuser
+          <button type="submit" disabled={pushSending} className="px-4 py-2 bg-emerald-600 disabled:opacity-50 text-white rounded text-sm font-medium">
+            {pushSending ? "Diffusion en cours..." : "Diffuser"}
           </button>
         </form>
+      )}
+      {activeTab === "push" && (
+        <div className="space-y-4">
+      <div className="bg-white border rounded-xl p-4 space-y-3">
+        <h3 className="font-semibold text-sm">Pushes diffusés ({pushes.length})</h3>
+        {pushes.map((p) => (
+          <div key={p.id} className="border rounded-lg p-3 text-sm flex justify-between items-start gap-3">
+            <div>
+              <p className="font-medium">{p.title} <span className="text-xs text-slate-400">({p.push_type} • {p.module_code})</span></p>
+              <p className="text-xs text-slate-600">{p.body}</p>
+            </div>
+            <div className="text-right text-xs shrink-0">
+              <p className="font-semibold text-slate-800">{p.total_responses || 0} réponse(s)</p>
+              {p.push_type === "quiz" && (
+                <p className="text-slate-500">✓ {p.correct_responses || 0} / ✗ {p.wrong_responses || 0}</p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="bg-white border rounded-xl p-4 space-y-2">
+        <h3 className="font-semibold text-sm">Réponses & preuves SHA-256 ({pushResponses.length})</h3>
+        {pushResponses.length === 0 ? (
+          <p className="text-xs text-slate-500">Aucune réponse enregistrée pour le moment.</p>
+        ) : pushResponses.map((r) => (
+          <div key={r.id} className="border rounded-lg p-2.5 text-xs space-y-1">
+            <div className="flex justify-between">
+              <span className="font-semibold">{r.user_identifier}</span>
+              <span className="text-slate-500">{new Date(r.responded_at).toLocaleString("fr-FR")}</span>
+            </div>
+            <p className="text-slate-700">Push : <strong>{r.push_title}</strong> — Réponse : <strong>{r.selected_option || r.free_text || "ACK"}</strong>{r.is_correct === true ? " (✓ Correct)" : r.is_correct === false ? " (✗ Incorrect)" : ""}</p>
+            <p className="font-mono text-[11px] text-slate-500 break-all">SHA-256 : {r.sha256_proof}</p>
+          </div>
+        ))}
+      </div>
+        </div>
       )}
     </div>
   </div>
