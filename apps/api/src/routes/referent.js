@@ -312,4 +312,52 @@ router.get("/referent/pushes/responses", referentTokenAuth, async (req, res) => 
   }
 });
 
+
+router.post("/referent/escalations/:id/reply", referentTokenAuth, async (req, res) => {
+  if (!req.referent.canWrite) {
+    return res.status(403).json({ status: "error", message: "Droits en écriture insuffisants pour ce référent." });
+  }
+  const { id } = req.params;
+  if (!UUID_REGEX.test(id)) {
+    return res.status(400).json({ status: "error", message: "Identifiant d'escalade invalide." });
+  }
+  const answer = typeof req.body?.answer === "string" ? req.body.answer.trim() : "";
+  if (!answer) {
+    return res.status(400).json({ status: "error", message: "La réponse est obligatoire." });
+  }
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [req.tenant.id]);
+    const sha256 = crypto
+      .createHash("sha256")
+      .update(JSON.stringify({ escalationId: id, tenantId: req.tenant.id, referentId: req.referent.id, answer }))
+      .digest("hex");
+    const upd = await client.query(
+      `UPDATE query_logs
+       SET referent_answer = $1,
+           referent_answer_sha256 = $2,
+           answered_by_role = $3,
+           answered_at = NOW(),
+           unanswered_flag = false
+       WHERE id = $4
+         AND COALESCE(module_code, 'socle_ri') = ANY($5::TEXT[])
+       RETURNING id, question_topic, referent_answer, referent_answer_sha256, answered_by_role, answered_at`,
+      [answer, sha256, req.referent.role, id, req.referent.scopes]
+    );
+    if (!upd.rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ status: "error", message: "Escalade introuvable ou hors périmètre." });
+    }
+    await client.query("COMMIT");
+    return res.json({ status: "ok", escalation: upd.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Erreur POST /referent/escalations/:id/reply:", err.message);
+    return res.status(500).json({ status: "error", message: "Erreur publication de la réponse.", detail: err.message });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
