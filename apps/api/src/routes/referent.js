@@ -109,4 +109,68 @@ router.get("/referent/me", referentTokenAuth, async (req, res) => {
   } finally { client.release(); }
 });
 
+
+router.post("/referent/pushes", referentTokenAuth, async (req, res) => {
+  if (!req.referent.canPush) {
+    return res.status(403).json({ status: "error", message: "Droits de diffusion insuffisants pour ce référent." });
+  }
+  const { moduleCode, pushType, title, body, documentId, options, correctOption } = req.body || {};
+  const cleanTitle = typeof title === "string" ? title.trim() : "";
+  const cleanBody = typeof body === "string" ? body.trim() : "";
+  if (!cleanTitle || !cleanBody) {
+    return res.status(400).json({ status: "error", message: "Titre et message obligatoires." });
+  }
+  const scope = ALLOWED_SCOPES.includes(moduleCode) && req.referent.scopes.includes(moduleCode)
+    ? moduleCode
+    : (req.referent.scopes[0] || "socle_ri");
+  const type = ["acknowledgment", "quiz", "flash"].includes(pushType) ? pushType : "flash";
+  const safeDocId = typeof documentId === "string" && UUID_REGEX.test(documentId) ? documentId : null;
+  const cleanOptions = Array.isArray(options) ? options.map((o) => String(o).trim()).filter(Boolean) : [];
+  const cleanCorrect = typeof correctOption === "string" && correctOption.trim() ? correctOption.trim() : null;
+
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [req.tenant.id]);
+    const ins = await client.query(
+      `INSERT INTO referent_pushes
+         (tenant_id, referent_id, referent_name, module_code, push_type, title, body, document_id, options_json, correct_option, active)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, true)
+       RETURNING id, module_code, push_type, title, body, document_id, options_json, correct_option, referent_name, created_at`,
+      [req.tenant.id, req.referent.id, req.referent.name, scope, type, cleanTitle, cleanBody, safeDocId, JSON.stringify(cleanOptions), cleanCorrect]
+    );
+    await client.query("COMMIT");
+    return res.status(201).json({ status: "ok", push: ins.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Erreur POST /referent/pushes:", err.message);
+    return res.status(500).json({ status: "error", message: "Erreur diffusion du push.", detail: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.get("/referent/pushes/active", referentTokenAuth, async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [req.tenant.id]);
+    const rows = await client.query(
+      `SELECT id, module_code, push_type, title, body, document_id, options_json, referent_name, created_at
+       FROM referent_pushes
+       WHERE tenant_id = $1 AND active = true AND module_code = ANY($2::TEXT[])
+       ORDER BY created_at DESC LIMIT 20`,
+      [req.tenant.id, req.referent.scopes]
+    );
+    await client.query("COMMIT");
+    return res.json({ status: "ok", pushes: rows.rows });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Erreur GET /referent/pushes/active:", err.message);
+    return res.status(500).json({ status: "error", message: "Erreur chargement pushes actifs." });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

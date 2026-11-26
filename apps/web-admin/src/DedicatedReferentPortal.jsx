@@ -46,7 +46,7 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
       setData(json);
       if (json.referent?.scopes?.length && !pushScope) setPushScope(json.referent.scopes[0]);
     } catch (e) {
-      setError(e.message);
+      console.error("Erreur portail référent:", e); setError(e.message || "Erreur réseau lors de la diffusion.");
     } finally {
       setLoading(false);
     }
@@ -81,7 +81,7 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
 
   const handleSendPush = async (e) => {
     e.preventDefault();
-    if (!pushTitle.trim() || !pushBody.trim()) return;
+    if (!pushTitle.trim() || !pushBody.trim()) { setError("Renseigne un titre et un message avant de diffuser."); return; }
     setPushSending(true);
     setError("");
     setFeedback("");
