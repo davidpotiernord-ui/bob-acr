@@ -314,9 +314,9 @@ router.get("/admin/referents", async (req, res) => {
       await client.query(
         `INSERT INTO tenant_referents (tenant_id, full_name, email, role, access_level, scopes, access_token)
          VALUES
-           ($1, 'Direction Conformité', 'conformite@atelier-metal.fr', 'admin_conformite', 'read_write', ARRAY['socle_ri','rgpd','cyber','sapin_ii','lcb_ft']::TEXT[]),
-           ($1, 'Claire Moreau', 'claire.moreau@atelier-metal.fr', 'referent_metier', 'read_write', ARRAY['socle_ri','cyber']::TEXT[]),
-           ($1, 'Marc Lefèvre', 'marc.lefevre@atelier-metal.fr', 'referent_metier', 'read_write', ARRAY['rgpd','sapin_ii','lcb_ft']::TEXT[])
+           ($1, 'Direction Conformité', 'conformite@atelier-metal.fr', 'admin_conformite', 'read_write', ARRAY['socle_ri','rgpd','cyber','sapin_ii','lcb_ft']::TEXT[], encode(gen_random_bytes(24), 'hex')),
+           ($1, 'Claire Moreau', 'claire.moreau@atelier-metal.fr', 'referent_metier', 'read_write', ARRAY['socle_ri','cyber']::TEXT[], encode(gen_random_bytes(24), 'hex')),
+           ($1, 'Marc Lefèvre', 'marc.lefevre@atelier-metal.fr', 'referent_metier', 'read_write', ARRAY['rgpd','sapin_ii','lcb_ft']::TEXT[], encode(gen_random_bytes(24), 'hex'))
          ON CONFLICT DO NOTHING`,
         [req.tenant.id]
       );
@@ -376,7 +376,7 @@ router.post("/admin/referents", requireAdminRole, async (req, res) => {
     ]);
 
     const insertRes = await client.query(
-      `INSERT INTO tenant_referents (tenant_id, full_name, email, role, access_level, scopes)
+      `INSERT INTO tenant_referents (tenant_id, full_name, email, role, access_level, scopes, access_token)
        VALUES ($1, $2, $3, $4, $5, $6, encode(gen_random_bytes(24), 'hex'))
        ON CONFLICT (tenant_id, LOWER(email))
        DO UPDATE SET
