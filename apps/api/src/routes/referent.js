@@ -287,6 +287,57 @@ router.post("/widget/pushes/:pushId/respond", async (req, res) => {
 });
 
 
+router.patch("/referent/pushes/:pushId", referentTokenAuth, async (req, res) => {
+  if (!req.referent.canPush) {
+    return res.status(403).json({ status: "error", message: "Droits de diffusion insuffisants pour ce référent." });
+  }
+  const { pushId } = req.params;
+  if (!UUID_REGEX.test(pushId)) {
+    return res.status(400).json({ status: "error", message: "Identifiant push invalide." });
+  }
+  const activeVal = typeof req.body?.active === "boolean" ? req.body.active : false;
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [req.tenant.id]);
+    const upd = await client.query(
+      "UPDATE referent_pushes SET active = $1 WHERE id = $2 AND tenant_id = $3 AND module_code = ANY($4::TEXT[]) RETURNING id, active",
+      [activeVal, pushId, req.tenant.id, req.referent.scopes]
+    );
+    await client.query("COMMIT");
+    if (!upd.rows.length) return res.status(404).json({ status: "error", message: "Push introuvable hors périmètre." });
+    return res.json({ status: "ok", push: upd.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    return res.status(500).json({ status: "error", message: "Erreur mise à jour push." });
+  } finally { client.release(); }
+});
+
+router.delete("/referent/pushes/:pushId", referentTokenAuth, async (req, res) => {
+  if (!req.referent.canPush) {
+    return res.status(403).json({ status: "error", message: "Droits de diffusion insuffisants pour ce référent." });
+  }
+  const { pushId } = req.params;
+  if (!UUID_REGEX.test(pushId)) {
+    return res.status(400).json({ status: "error", message: "Identifiant push invalide." });
+  }
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [req.tenant.id]);
+    const del = await client.query(
+      "DELETE FROM referent_pushes WHERE id = $1 AND tenant_id = $2 AND module_code = ANY($3::TEXT[]) RETURNING id",
+      [pushId, req.tenant.id, req.referent.scopes]
+    );
+    await client.query("COMMIT");
+    if (!del.rows.length) return res.status(404).json({ status: "error", message: "Push introuvable hors périmètre." });
+    return res.json({ status: "ok", deletedId: del.rows[0].id });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    return res.status(500).json({ status: "error", message: "Erreur suppression push." });
+  } finally { client.release(); }
+});
+
 router.get("/referent/pushes/responses", referentTokenAuth, async (req, res) => {
   const client = await db.pool.connect();
   try {
