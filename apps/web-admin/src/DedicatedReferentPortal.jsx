@@ -137,6 +137,78 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
   const acks = Array.isArray(data.acknowledgments) ? data.acknowledgments : [];
   const pushes = data.pushes || [];
   const pushResponses = data.push_responses || [];
+
+  const triggerDownload = (filename, mimeType, content) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const handleExportJson = () => {
+    if (!data) return;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const payload = {
+      exported_at: new Date().toISOString(),
+      tenant: data.tenant,
+      referent: {
+        name: ref.name,
+        email: ref.email,
+        role: ref.role,
+        scopes: ref.scopes,
+      },
+      summary: {
+        pushes_count: pushes.length,
+        responses_count: pushResponses.length,
+        escalations_count: escs.length,
+        acknowledgments_count: acks.length,
+      },
+      pushes,
+      push_responses: pushResponses,
+      escalations: escs,
+      acknowledgments: acks,
+    };
+    triggerDownload(`audit-bob-${stamp}.json`, "application/json;charset=utf-8", JSON.stringify(payload, null, 2));
+  };
+
+  const handleExportCsv = () => {
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    const escCsv = (val) => `"${String(val ?? "").replaceAll("\"", "\"\"")}"`;
+    const headers = [
+      "responded_at",
+      "module_code",
+      "push_type",
+      "push_title",
+      "user_identifier",
+      "selected_option",
+      "is_correct",
+      "sha256_proof",
+    ];
+    const lines = [
+      headers.join(";"),
+      ...pushResponses.map((r) =>
+        [
+          r.responded_at,
+          r.module_code,
+          r.push_type,
+          r.push_title,
+          r.user_identifier,
+          r.selected_option || r.free_text || "ACK",
+          r.is_correct,
+          r.sha256_proof,
+        ]
+          .map(escCsv)
+          .join(";")
+      ),
+    ];
+    triggerDownload(`audit-quiz-responses-${stamp}.csv`, "text/csv;charset=utf-8", "\uFEFF" + lines.join("\n"));
+  };
+
   return (
   <div className="min-h-screen bg-slate-50 p-6">
     <div className="max-w-5xl mx-auto space-y-4">
@@ -145,9 +217,17 @@ export default function DedicatedReferentPortal({ token, apiBase }) {
           <h1 className="font-bold text-lg">Espace Referent - {ref.name}</h1>
           <p className="text-xs text-slate-500">{badge.label} - {ref.scopes.join(", ")}</p>
         </div>
-        <button type="button" onClick={loadPortal} className="px-3 py-1.5 border rounded-lg text-sm">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button type="button" onClick={handleExportCsv} className="px-3 py-1.5 border rounded-lg text-sm bg-white hover:bg-slate-50">
+            Export CSV
+          </button>
+          <button type="button" onClick={handleExportJson} className="px-3 py-1.5 border rounded-lg text-sm bg-white hover:bg-slate-50">
+            Export JSON
+          </button>
+          <button type="button" onClick={loadPortal} className="px-3 py-1.5 border rounded-lg text-sm">
           Actualiser
         </button>
+        </div>
       </div>
       <div className="flex gap-2 flex-wrap">
         {["escalations", "documents", "acknowledgments", ...(ref.canPush ? ["push"] : [])].map((t) => (
