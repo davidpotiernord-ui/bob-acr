@@ -173,4 +173,107 @@ router.get("/referent/pushes/active", referentTokenAuth, async (req, res) => {
   }
 });
 
+
+async function resolveWidgetTenant(req) {
+  if (req.tenant && req.tenant.id) return req.tenant;
+  const auth = typeof req.headers.authorization === "string" ? req.headers.authorization.trim() : "";
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+  if (bearer) {
+    const tRes = await db.query("SELECT id, name FROM tenants WHERE api_key = $1 LIMIT 1", [bearer]);
+    if (tRes.rows[0]) return tRes.rows[0];
+  }
+  const fallback = await db.query("SELECT id, name FROM tenants WHERE id = '11111111-1111-1111-1111-111111111111' LIMIT 1");
+  return fallback.rows[0] || null;
+}
+
+router.get("/widget/pushes/pending", async (req, res) => {
+  await ensureReferentAndPushSchema();
+  const tenant = await resolveWidgetTenant(req);
+  if (!tenant) return res.status(401).json({ unreadCount: 0, pushes: [] });
+
+  const userEmail = String(req.query.user || "salarie.demo@atelier-sud.fr").trim().toLowerCase();
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [tenant.id]);
+    const rows = await client.query(
+      `SELECT p.id, p.module_code, p.push_type, p.title, p.body, p.document_id, p.options_json, p.referent_name, p.created_at
+       FROM referent_pushes p
+       WHERE p.tenant_id = $1
+         AND p.active = true
+         AND NOT EXISTS (
+           SELECT 1 FROM referent_push_responses r
+           WHERE r.push_id = p.id AND LOWER(r.user_identifier) = $2
+         )
+       ORDER BY p.created_at DESC
+       LIMIT 20`,
+      [tenant.id, userEmail]
+    );
+    await client.query("COMMIT");
+    return res.json({ unreadCount: rows.rows.length, pushes: rows.rows });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Erreur GET /widget/pushes/pending:", err.message);
+    return res.status(500).json({ unreadCount: 0, pushes: [] });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/widget/pushes/:pushId/respond", async (req, res) => {
+  await ensureReferentAndPushSchema();
+  const tenant = await resolveWidgetTenant(req);
+  if (!tenant) return res.status(401).json({ status: "error", message: "Tenant non identifié." });
+
+  const { pushId } = req.params;
+  if (!UUID_REGEX.test(pushId)) {
+    return res.status(400).json({ status: "error", message: "Identifiant push invalide." });
+  }
+  const { userIdentifier, selectedOption, freeText } = req.body || {};
+  const actor = String(userIdentifier || "salarie.demo@atelier-sud.fr").trim().toLowerCase();
+  const chosen = typeof selectedOption === "string" && selectedOption.trim() ? selectedOption.trim() : null;
+  const note = typeof freeText === "string" && freeText.trim() ? freeText.trim() : null;
+
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [tenant.id]);
+    const pushRes = await client.query(
+      `SELECT id, push_type, correct_option FROM referent_pushes WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+      [pushId, tenant.id]
+    );
+    const push = pushRes.rows[0];
+    if (!push) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ status: "error", message: "Push introuvable." });
+    }
+    const isCorrect = push.push_type === "quiz" && push.correct_option && chosen
+      ? chosen.toLowerCase() === String(push.correct_option).trim().toLowerCase()
+      : null;
+    const respondedAt = new Date().toISOString();
+    const sha256Proof = crypto
+      .createHash("sha256")
+      .update(`${push.id}|${actor}|${chosen || ""}|${note || ""}|${respondedAt}`)
+      .digest("hex");
+
+    const ins = await client.query(
+      `INSERT INTO referent_push_responses
+         (push_id, tenant_id, user_identifier, selected_option, free_text, is_correct, sha256_proof, responded_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
+       ON CONFLICT (push_id, LOWER(user_identifier))
+       DO UPDATE SET selected_option = EXCLUDED.selected_option, free_text = EXCLUDED.free_text, is_correct = EXCLUDED.is_correct, sha256_proof = EXCLUDED.sha256_proof, responded_at = EXCLUDED.responded_at
+       RETURNING id, push_id, user_identifier, selected_option, is_correct, sha256_proof, responded_at`,
+      [push.id, tenant.id, actor, chosen, note, isCorrect, sha256Proof, respondedAt]
+    );
+    await client.query("COMMIT");
+    return res.json({ status: "ok", response: ins.rows[0] });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Erreur POST /widget/pushes/:pushId/respond:", err.message);
+    return res.status(500).json({ status: "error", message: "Erreur enregistrement réponse push." });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
