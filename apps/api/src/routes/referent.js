@@ -95,14 +95,15 @@ router.get("/referent/me", referentTokenAuth, async (req, res) => {
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [req.tenant.id]);
     const scopes = req.referent.scopes;
-    const [docsRes, acksRes, escsRes, pushesRes] = await Promise.all([
+    const [docsRes, acksRes, escsRes, pushesRes, pushResponsesRes] = await Promise.all([
       client.query("SELECT id, title, module_code, version, status, requires_acknowledgment, created_at FROM documents WHERE COALESCE(module_code, 'socle_ri') = ANY($1::TEXT[]) ORDER BY created_at DESC", [scopes]),
       client.query("SELECT a.id, a.document_id, COALESCE(u.full_name, u.email, a.user_id::text) AS user_identifier, u.department, a.acknowledged_at, d.title AS document_title, COALESCE(d.module_code, 'socle_ri') AS module_code FROM acknowledgments a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN documents d ON d.id = a.document_id WHERE COALESCE(d.module_code, 'socle_ri') = ANY($1::TEXT[]) ORDER BY a.acknowledged_at DESC LIMIT 200", [scopes]),
       client.query("SELECT id, channel, COALESCE(module_code, 'socle_ri') AS module_code, question_topic, confidence_score, unanswered_flag, was_escalated, referent_answer, referent_answer_sha256, answered_by_role, answered_at, created_at FROM query_logs WHERE (unanswered_flag = true OR was_escalated = true) AND COALESCE(module_code, 'socle_ri') = ANY($1::TEXT[]) ORDER BY created_at DESC LIMIT 100", [scopes]),
-      client.query("SELECT p.id, p.module_code, p.push_type, p.title, p.body, p.document_id, p.options_json, p.correct_option, p.referent_name, p.created_at, COUNT(r.id)::int AS total_responses, COUNT(r.id) FILTER (WHERE r.is_correct = true)::int AS correct_responses, COUNT(r.id) FILTER (WHERE r.is_correct = false)::int AS wrong_responses FROM referent_pushes p LEFT JOIN referent_push_responses r ON r.push_id = p.id WHERE p.tenant_id = $1 AND p.module_code = ANY($2::TEXT[]) GROUP BY p.id ORDER BY p.created_at DESC LIMIT 50", [req.tenant.id, scopes])
+      client.query("SELECT p.id, p.module_code, p.push_type, p.title, p.body, p.document_id, p.options_json, p.correct_option, p.referent_name, p.created_at, COUNT(r.id)::int AS total_responses, COUNT(r.id) FILTER (WHERE r.is_correct = true)::int AS correct_responses, COUNT(r.id) FILTER (WHERE r.is_correct = false)::int AS wrong_responses FROM referent_pushes p LEFT JOIN referent_push_responses r ON r.push_id = p.id WHERE p.tenant_id = $1 AND p.module_code = ANY($2::TEXT[]) GROUP BY p.id ORDER BY p.created_at DESC LIMIT 50", [req.tenant.id, scopes]),
+      client.query("SELECT r.id, r.push_id, r.user_identifier, r.selected_option, r.free_text, r.is_correct, r.sha256_proof, r.responded_at, p.title AS push_title, p.push_type, p.module_code, p.referent_name FROM referent_push_responses r JOIN referent_pushes p ON p.id = r.push_id WHERE p.tenant_id = $1 AND p.module_code = ANY($2::TEXT[]) ORDER BY r.responded_at DESC LIMIT 100", [req.tenant.id, scopes])
     ]);
     await client.query("COMMIT");
-    return res.json({ status: "ok", tenant: req.tenant, referent: req.referent, documents: docsRes.rows, acknowledgments: acksRes.rows, escalations: escsRes.rows, pushes: pushesRes.rows });
+    return res.json({ status: "ok", tenant: req.tenant, referent: req.referent, documents: docsRes.rows, acknowledgments: acksRes.rows, escalations: escsRes.rows, pushes: pushesRes.rows, push_responses: pushResponsesRes.rows });
   } catch (err) {
     await client.query("ROLLBACK").catch(() => {});
     console.error("Erreur /referent/me:", err.message); return res.status(500).json({ status: "error", message: "Erreur chargement espace référent.", detail: err.message });
@@ -280,6 +281,32 @@ router.post("/widget/pushes/:pushId/respond", async (req, res) => {
     await client.query("ROLLBACK").catch(() => {});
     console.error("Erreur POST /widget/pushes/:pushId/respond:", err.message);
     return res.status(500).json({ status: "error", message: "Erreur enregistrement réponse push." });
+  } finally {
+    client.release();
+  }
+});
+
+
+router.get("/referent/pushes/responses", referentTokenAuth, async (req, res) => {
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [req.tenant.id]);
+    const rows = await client.query(
+      `SELECT r.id, r.push_id, r.user_identifier, r.selected_option, r.free_text, r.is_correct, r.sha256_proof, r.responded_at,
+              p.title AS push_title, p.push_type, p.module_code, p.referent_name
+       FROM referent_push_responses r
+       JOIN referent_pushes p ON p.id = r.push_id
+       WHERE p.tenant_id = $1 AND p.module_code = ANY($2::TEXT[])
+       ORDER BY r.responded_at DESC LIMIT 100`,
+      [req.tenant.id, req.referent.scopes]
+    );
+    await client.query("COMMIT");
+    return res.json({ status: "ok", responses: rows.rows });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Erreur GET /referent/pushes/responses:", err.message);
+    return res.status(500).json({ status: "error", message: "Erreur chargement réponses pushes." });
   } finally {
     client.release();
   }

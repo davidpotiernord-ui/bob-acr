@@ -562,4 +562,32 @@ router.post("/admin/referents/notify", requireAdminRole, async (req, res) => {
   }
 });
 
+
+router.get("/admin/pushes/responses", async (req, res) => {
+  const tenantId = req.tenant && req.tenant.id;
+  if (!tenantId) return res.status(401).json({ status: "error", message: "Tenant requis." });
+  const client = await db.pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_tenant_id', $1, true)", [tenantId]);
+    const rows = await client.query(
+      `SELECT r.id, r.push_id, r.user_identifier, r.selected_option, r.free_text, r.is_correct, r.sha256_proof, r.responded_at,
+              p.title AS push_title, p.push_type, p.module_code, p.referent_name
+       FROM referent_push_responses r
+       JOIN referent_pushes p ON p.id = r.push_id
+       WHERE p.tenant_id = $1
+       ORDER BY r.responded_at DESC LIMIT 200`,
+      [tenantId]
+    );
+    await client.query("COMMIT");
+    return res.json({ status: "ok", responses: rows.rows });
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("Erreur GET /admin/pushes/responses:", err.message);
+    return res.status(500).json({ status: "error", message: "Erreur chargement réponses pushes admin." });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
