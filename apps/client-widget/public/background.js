@@ -42,11 +42,13 @@ async function readExtensionConfig() {
   const apiUrl = String(
     managedCfg.api_url || localCfg.bob_api_url || localCfg.api_url || BOB_DEFAULT_API
   ).replace(/\/+$/, "");
+  const sessionToken = String(localCfg.bob_widget_session_token || "").trim();
+  const sessionUserEmail = String(localCfg.bob_widget_session_user?.email || "").trim();
   const apiKey = String(
-    managedCfg.api_key || localCfg.bob_api_key || localCfg.api_key || BOB_DEFAULT_API_KEY
+    sessionToken || managedCfg.api_key || localCfg.bob_api_key || localCfg.api_key || BOB_DEFAULT_API_KEY
   );
   const userEmail = String(
-    managedCfg.user_email || localCfg.bob_user_email || localCfg.user_email || BOB_DEFAULT_USER_EMAIL
+    sessionUserEmail || managedCfg.user_email || localCfg.bob_user_email || localCfg.user_email || BOB_DEFAULT_USER_EMAIL
   );
   const trackedRaw =
     localCfg.bobTrackedEscalations ||
@@ -173,6 +175,17 @@ chrome.storage?.onChanged?.addListener(() => {
 });
 
 chrome.runtime?.onMessage?.addListener((msg, _sender, sendResponse) => {
+  if (msg?.type === "BOB_OPEN_SIDEPANEL") {
+    const winId = _sender?.tab?.windowId;
+    if (chrome.sidePanel && typeof winId === "number") {
+      chrome.sidePanel.open({ windowId: winId })
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }));
+      return true;
+    }
+    sendResponse({ ok: false, error: "sidePanel indisponible" });
+    return true;
+  }
   if (msg?.type === "BOB_GET_BADGE") {
     Promise.resolve(refreshBobPushBadge()).then(() => {
       chrome.storage?.local?.get(["bobBadgeCount"], (res) => {

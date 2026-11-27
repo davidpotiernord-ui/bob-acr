@@ -38,6 +38,8 @@
     {
       "resources": [
         "index.html",
+        "widget-embed.js",
+        "widget-embed.css",
         "assets/*"
       ],
       "matches": [

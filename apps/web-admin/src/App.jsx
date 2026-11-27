@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import DedicatedReferentPortal from "./DedicatedReferentPortal";
+import LocalUsersManager from "./components/LocalUsersManager";
 import {
   ShieldCheck,
   FileText,
@@ -1060,6 +1061,7 @@ export default function App() {
           )}
 
           {tab === 'settings' && (
+            <div className="space-y-6">
             <div className="grid md:grid-cols-2 gap-4 items-start">
               <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
                 <div className="flex items-center gap-2 font-semibold text-sm">
@@ -1177,6 +1179,8 @@ export default function App() {
                   )}
                 </div>
               </form>
+            </div>
+            <LocalUsersManager apiOrigin={API_ORIGIN} getAuthHeaders={getAuthHeaders} authMode={authMode} />
             </div>
           )}
         </main>

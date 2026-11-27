@@ -3,6 +3,23 @@ function getApiOrigin() {
   const raw = (import.meta.env.VITE_BOB_API_URL || "https://bob-acr-api.osc-fr1.scalingo.io").replace(/\/+$/, "");
   return raw.endsWith("/api") ? raw.slice(0, -4) : raw;
 }
+function syncSessionToChromeStorage(token, user) {
+  try {
+    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+      const payload = {};
+      if (token) payload.bob_widget_session_token = token;
+      else payload.bob_widget_session_token = null;
+      if (user) {
+        payload.bob_widget_session_user = user;
+        if (user.email) payload.bob_user_email = user.email;
+      } else {
+        payload.bob_widget_session_user = null;
+      }
+      chrome.storage.local.set(payload, () => {});
+    }
+  } catch {}
+}
+
 function consumeHashToken() {
   if (typeof window === "undefined") return null;
   const hash = window.location.hash || "";
@@ -10,6 +27,7 @@ function consumeHashToken() {
   if (!m) return null;
   const tok = decodeURIComponent(m[1]);
   window.localStorage?.setItem("bob_widget_session_token", tok);
+  syncSessionToChromeStorage(tok, null);
   window.history.replaceState(null, "", window.location.pathname + window.location.search);
   return tok;
 }
@@ -32,6 +50,7 @@ export default function WidgetAuthBar({ onAuthChange }) {
         if (d?.user) {
           setUser(d.user);
           window.localStorage?.setItem("bob_widget_session_user", JSON.stringify(d.user));
+          syncSessionToChromeStorage(tok, d.user);
           onAuthChange?.(d);
         }
       }).catch(() => {});
@@ -60,6 +79,7 @@ export default function WidgetAuthBar({ onAuthChange }) {
       if (!res.ok) throw new Error(data.error || "Identifiants invalides");
       window.localStorage?.setItem("bob_widget_session_token", data.token);
       window.localStorage?.setItem("bob_widget_session_user", JSON.stringify(data.user));
+      syncSessionToChromeStorage(data.token, data.user);
       setUser(data.user); setPassword(""); setOpen(false); onAuthChange?.(data);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -68,8 +88,37 @@ export default function WidgetAuthBar({ onAuthChange }) {
     if (tok) await fetch(getApiOrigin() + "/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + tok } }).catch(() => {});
     window.localStorage?.removeItem("bob_widget_session_token");
     window.localStorage?.removeItem("bob_widget_session_user");
+    syncSessionToChromeStorage(null, null);
     setUser(null); setDiscovery(null); onAuthChange?.(null);
   }
+
+  useEffect(() => {
+    if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.onChanged) return;
+    const listener = (changes, area) => {
+      if (area !== "local") return;
+      if (changes.bob_widget_session_token) {
+        const nextTok = changes.bob_widget_session_token.newValue || "";
+        if (nextTok) window.localStorage?.setItem("bob_widget_session_token", nextTok);
+        else window.localStorage?.removeItem("bob_widget_session_token");
+      }
+      if (changes.bob_widget_session_user) {
+        const nextUser = changes.bob_widget_session_user.newValue || null;
+        const prevSerialized = window.localStorage?.getItem("bob_widget_session_user") || "null";
+        const nextSerialized = JSON.stringify(nextUser);
+        if (nextUser) {
+          if (prevSerialized !== nextSerialized) {
+            window.localStorage?.setItem("bob_widget_session_user", nextSerialized);
+            setUser(nextUser);
+          }
+        } else if (prevSerialized !== "null") {
+          window.localStorage?.removeItem("bob_widget_session_user");
+          setUser(null);
+        }
+      }
+    };
+    chrome.storage.onChanged.addListener(listener);
+    return () => chrome.storage.onChanged.removeListener(listener);
+  }, []);
   return (
     <div style={{ padding: "6px 12px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>

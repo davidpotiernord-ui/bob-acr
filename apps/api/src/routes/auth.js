@@ -1,7 +1,7 @@
 const express = require("express");
 const db = require("../services/db");
 const tenantAuth = require("../middleware/tenantAuth");
-const { sha256, verifyPassword, signOAuthState, verifyOAuthState, decodeJwtPayload, resolveOidcEndpoints, createUserSession, findTenantByEmailDomain } = require("../services/authService");
+const { ADMIN_USER_ROLES, sha256, hashPassword, verifyPassword, signOAuthState, verifyOAuthState, decodeJwtPayload, resolveOidcEndpoints, createUserSession, findTenantByEmailDomain } = require("../services/authService");
 const router = express.Router();
 function getPublicApiUrl(req) { if (process.env.API_PUBLIC_URL) return process.env.API_PUBLIC_URL.replace(/\/$/, ""); return (req.headers["x-forwarded-proto"] || req.protocol || "https") + "://" + req.get("host"); }
 function getDefaultRedirectUrl() { return (process.env.ADMIN_APP_URL || "http://localhost:5174").replace(/\/$/, ""); }
@@ -59,6 +59,144 @@ router.put("/tenant-config", tenantAuth, async (req, res) => {
   } catch (err) {
     console.error("Erreur PUT /auth/tenant-config:", err);
     return res.status(500).json({ error: "Erreur sauvegarde configuration SSO" });
+  }
+});
+
+
+function canManageLocalUsers(req) {
+  const role = String(req.user?.role || req.apiKeyRole || "").toLowerCase();
+  return req.apiKeyRole === "admin" || ADMIN_USER_ROLES.has(role) || ["admin", "owner"].includes(role);
+}
+
+router.get("/local-users", tenantAuth, async (req, res) => {
+  try {
+    if (!canManageLocalUsers(req)) {
+      return res.status(403).json({ error: "Droits administrateur requis" });
+    }
+    const tenantId = req.tenantId || req.tenant?.id;
+    const { rows } = await db.query(
+      "SELECT id, tenant_id, email, full_name, role, auth_provider, is_active, last_login_at, created_at FROM users WHERE tenant_id = $1 AND COALESCE(auth_provider, 'local_email') = 'local_email' ORDER BY created_at DESC, email ASC",
+      [tenantId]
+    );
+    return res.json({ users: rows });
+  } catch (err) {
+    console.error("Erreur GET /auth/local-users:", err);
+    return res.status(500).json({ error: "Erreur chargement utilisateurs locaux" });
+  }
+});
+
+router.post("/local-users", tenantAuth, async (req, res) => {
+  try {
+    if (!canManageLocalUsers(req)) {
+      return res.status(403).json({ error: "Droits administrateur requis" });
+    }
+    const tenantId = req.tenantId || req.tenant?.id;
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const fullName = String(req.body?.fullName ?? req.body?.full_name ?? "").trim();
+    const role = String(req.body?.role || "employee").trim();
+    const password = String(req.body?.password || "");
+
+    if (!email || !email.includes("@")) {
+      return res.status(400).json({ error: "Adresse email valide requise" });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ error: "Mot de passe de 8 caractères minimum requis" });
+    }
+
+    const { rows: existing } = await db.query(
+      "SELECT id FROM users WHERE tenant_id = $1 AND LOWER(email) = $2 LIMIT 1",
+      [tenantId, email]
+    );
+    if (existing.length > 0) {
+      return res.status(409).json({ error: "Un utilisateur avec cet email existe déjà" });
+    }
+
+    const passwordHash = hashPassword(password);
+    const { rows } = await db.query(
+      "INSERT INTO users (tenant_id, email, full_name, role, auth_provider, password_hash, is_active) VALUES ($1, $2, $3, $4, 'local_email', $5, TRUE) RETURNING id, tenant_id, email, full_name, role, auth_provider, is_active, last_login_at, created_at",
+      [tenantId, email, fullName || email.split("@")[0], role || "employee", passwordHash]
+    );
+    return res.status(201).json({ user: rows[0] });
+  } catch (err) {
+    console.error("Erreur POST /auth/local-users:", err);
+    return res.status(500).json({ error: "Erreur création utilisateur local" });
+  }
+});
+
+router.patch("/local-users/:userId", tenantAuth, async (req, res) => {
+  try {
+    if (!canManageLocalUsers(req)) {
+      return res.status(403).json({ error: "Droits administrateur requis" });
+    }
+    const tenantId = req.tenantId || req.tenant?.id;
+    const userId = String(req.params.userId || "").trim();
+    const updates = [];
+    const params = [tenantId, userId];
+
+    if (typeof req.body?.is_active === "boolean") {
+      params.push(req.body.is_active);
+      updates.push(`is_active = ${params.length}`);
+    } else if (typeof req.body?.isActive === "boolean") {
+      params.push(req.body.isActive);
+      updates.push(`is_active = ${params.length}`);
+    }
+
+    if (typeof req.body?.role === "string" && req.body.role.trim()) {
+      params.push(req.body.role.trim());
+      updates.push(`role = ${params.length}`);
+    }
+
+    if (typeof req.body?.fullName === "string" || typeof req.body?.full_name === "string") {
+      const nameVal = String(req.body.fullName ?? req.body.full_name).trim();
+      params.push(nameVal);
+      updates.push(`full_name = ${params.length}`);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: "Aucune modification fournie" });
+    }
+
+    const { rows } = await db.query(
+      `UPDATE users SET ${updates.join(", ")} WHERE tenant_id = $1 AND id = $2 RETURNING id, tenant_id, email, full_name, role, auth_provider, is_active, last_login_at, created_at`,
+      params
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: "Utilisateur introuvable" });
+    }
+    return res.json({ user: rows[0] });
+  } catch (err) {
+    console.error("Erreur PATCH /auth/local-users/:userId:", err);
+    return res.status(500).json({ error: "Erreur mise à jour utilisateur" });
+  }
+});
+
+router.post("/local-users/:userId/reset-password", tenantAuth, async (req, res) => {
+  try {
+    if (!canManageLocalUsers(req)) {
+      return res.status(403).json({ error: "Droits administrateur requis" });
+    }
+    const tenantId = req.tenantId || req.tenant?.id;
+    const userId = String(req.params.userId || "").trim();
+    const newPassword = String(req.body?.password || "");
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: "Nouveau mot de passe de 8 caractères minimum requis" });
+    }
+    const passwordHash = hashPassword(newPassword);
+    const { rows } = await db.query(
+      "UPDATE users SET password_hash = $3 WHERE tenant_id = $1 AND id = $2 RETURNING id, email",
+      [tenantId, userId, passwordHash]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: "Utilisateur introuvable" });
+    }
+    await db.query(
+      "UPDATE user_sessions SET revoked_at = NOW() WHERE tenant_id = $1 AND user_id = $2 AND revoked_at IS NULL",
+      [tenantId, userId]
+    ).catch(() => {});
+    return res.json({ status: "ok", user: rows[0] });
+  } catch (err) {
+    console.error("Erreur POST /auth/local-users/:userId/reset-password:", err);
+    return res.status(500).json({ error: "Erreur réinitialisation mot de passe" });
   }
 });
 

@@ -31,11 +31,30 @@ function getManagedConfig() {
   });
 }
 
+function getChromeLocalSession() {
+  return new Promise((resolve) => {
+    try {
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(["bob_widget_session_token", "bob_widget_session_user"], (items) => {
+          if (chrome.runtime && chrome.runtime.lastError) return resolve({ token: "", user: null });
+          resolve({
+            token: items?.bob_widget_session_token || "",
+            user: items?.bob_widget_session_user || null,
+          });
+        });
+        return;
+      }
+    } catch {}
+    resolve({ token: "", user: null });
+  });
+}
+
 async function resolveAuthHeaders() {
   const managed = await getManagedConfig();
   const baseUrl = (managed.api_url || DEFAULT_API_URL).replace(/\/+$/, '');
-  const sessionToken = (typeof window !== "undefined" && window.localStorage?.getItem("bob_widget_session_token")) || "";
-  const sessionUser = (() => { try { return JSON.parse(window.localStorage?.getItem("bob_widget_session_user") || "null"); } catch { return null; } })();
+  const extSession = await getChromeLocalSession();
+  const sessionToken = ((typeof window !== "undefined" && window.localStorage?.getItem("bob_widget_session_token")) || extSession.token || "");
+  const sessionUser = (() => { try { return JSON.parse(window.localStorage?.getItem("bob_widget_session_user") || "null") || extSession.user; } catch { return extSession.user; } })();
   const apiKey = sessionToken || managed.api_key || DEFAULT_API_KEY;
   const userEmail = sessionUser?.email || managed.user_email || DEFAULT_USER_EMAIL;
   const headers = { 'Content-Type': 'application/json' };
