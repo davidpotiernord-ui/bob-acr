@@ -135,21 +135,21 @@ router.patch("/local-users/:userId", tenantAuth, async (req, res) => {
 
     if (typeof req.body?.is_active === "boolean") {
       params.push(req.body.is_active);
-      updates.push(`is_active = ${params.length}`);
+      updates.push(`is_active = $${params.length}`);
     } else if (typeof req.body?.isActive === "boolean") {
       params.push(req.body.isActive);
-      updates.push(`is_active = ${params.length}`);
+      updates.push(`is_active = $${params.length}`);
     }
 
     if (typeof req.body?.role === "string" && req.body.role.trim()) {
       params.push(req.body.role.trim());
-      updates.push(`role = ${params.length}`);
+      updates.push(`role = $${params.length}`);
     }
 
     if (typeof req.body?.fullName === "string" || typeof req.body?.full_name === "string") {
       const nameVal = String(req.body.fullName ?? req.body.full_name).trim();
       params.push(nameVal);
-      updates.push(`full_name = ${params.length}`);
+      updates.push(`full_name = $${params.length}`);
     }
 
     if (updates.length === 0) {
