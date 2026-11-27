@@ -17,7 +17,7 @@ router.get("/tenant-config", tenantAuth, async (req, res) => {
     const role = req.user?.role || req.apiKeyRole || "";
     if (role && !["admin", "admin_rh", "owner"].includes(String(role).toLowerCase())) return res.status(403).json({ error: "Droits administrateur requis" });
     const { rows } = await db.query(
-      "SELECT id, name, slug, auth_mode, allowed_email_domains, sso_provider, sso_issuer_url, sso_client_id, (sso_client_secret IS NOT NULL AND sso_client_secret <> '') AS has_client_secret FROM tenants WHERE id = $1 LIMIT 1",
+      "SELECT id, name, slug, auth_mode, allowed_email_domains, sso_provider, sso_issuer_url, sso_client_id, COALESCE(use_shared_base, true) AS use_shared_base, (sso_client_secret IS NOT NULL AND sso_client_secret <> '') AS has_client_secret FROM tenants WHERE id = $1 LIMIT 1",
       [req.tenant.id]
     );
     if (!rows[0]) return res.status(404).json({ error: "Tenant introuvable" });
@@ -41,18 +41,19 @@ router.put("/tenant-config", tenantAuth, async (req, res) => {
       ? req.body.allowed_email_domains
       : String(req.body?.allowed_email_domains || "").split(",");
     const domains = rawDomains.map((d) => String(d).trim().toLowerCase().replace(/^@/, "")).filter(Boolean);
+    const useSharedBase = typeof req.body?.use_shared_base === "boolean" ? req.body.use_shared_base : true;
 
     if (authMode === "sso" && (!ssoIssuerUrl || !ssoClientId)) {
       return res.status(400).json({ error: "sso_issuer_url et sso_client_id sont requis en mode SSO." });
     }
 
-    const params = [authMode, domains, ssoProvider, ssoIssuerUrl, ssoClientId, req.tenant.id];
-    let sql = "UPDATE tenants SET auth_mode = $1, allowed_email_domains = $2, sso_provider = $3, sso_issuer_url = $4, sso_client_id = $5";
+    const params = [authMode, domains, ssoProvider, ssoIssuerUrl, ssoClientId, useSharedBase, req.tenant.id];
+    let sql = "UPDATE tenants SET auth_mode = $1, allowed_email_domains = $2, sso_provider = $3, sso_issuer_url = $4, sso_client_id = $5, use_shared_base = $6";
     if (ssoClientSecret) {
       params.push(ssoClientSecret);
       sql += ", sso_client_secret = $" + params.length;
     }
-    sql += " WHERE id = $6 RETURNING id, name, slug, auth_mode, allowed_email_domains, sso_provider, sso_issuer_url, sso_client_id, (sso_client_secret IS NOT NULL AND sso_client_secret <> '') AS has_client_secret";
+    sql += " WHERE id = $7 RETURNING id, name, slug, auth_mode, allowed_email_domains, sso_provider, sso_issuer_url, sso_client_id, COALESCE(use_shared_base, true) AS use_shared_base, (sso_client_secret IS NOT NULL AND sso_client_secret <> '') AS has_client_secret";
 
     const { rows } = await db.query(sql, params);
     return res.json({ status: "ok", tenant: rows[0] });

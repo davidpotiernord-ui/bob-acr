@@ -94,6 +94,7 @@ export default function App() {
         setSsoClientId(data.tenant.sso_client_id || '');
         setHasClientSecret(Boolean(data.tenant.has_client_secret));
         setAllowedDomainsInput(Array.isArray(data.tenant.allowed_email_domains) ? data.tenant.allowed_email_domains.join(', ') : '');
+        if (typeof data.tenant.use_shared_base === "boolean") setUseSharedBase(data.tenant.use_shared_base);
       }
     } catch (_) {}
   };
@@ -113,6 +114,7 @@ export default function App() {
           sso_client_id: ssoClientId,
           sso_client_secret: ssoClientSecret,
           allowed_email_domains: allowedDomainsInput,
+          use_shared_base: useSharedBase,
         }),
       });
       const data = await res.json();
