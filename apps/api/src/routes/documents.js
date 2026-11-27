@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const db = require('../services/db');
 const { embedText } = require('../services/llm');
+const { logProviderError } = require('../services/errorLogger');
 
 const router = express.Router();
 
@@ -209,6 +210,16 @@ router.post('/documents', async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('Erreur POST /api/documents:', err.message);
+    await logProviderError({
+      tenantId: req.tenant?.id || null,
+      category: 'embedding_ingestion',
+      severity: 'error',
+      errorCode: err.code || 'EMBEDDING_INGESTION_FAIL',
+      httpStatus: 500,
+      summary: err.message || 'Échec découpage ou vectorisation documentaire',
+      endpoint: 'POST /api/documents',
+      recommendedAction: 'Vérifier MISTRAL_API_KEY, le format du texte et la dimension pgvector(1536).',
+    });
     return res.status(500).json({
       status: 'error',
       message: 'Failed to ingest document',

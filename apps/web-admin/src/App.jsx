@@ -358,11 +358,11 @@ function ProviderConsoleView({ onExit }) {
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
                       <tr className="border-b border-slate-200 text-slate-500">
-                        <th className="py-2 pr-3">Date</th>
+                        <th className="py-2 pr-3">Dernière vue</th>
                         <th className="py-2 px-3">Organisation</th>
                         <th className="py-2 px-3">Catégorie</th>
-                        <th className="py-2 px-3">Code / Endpoint</th>
-                        <th className="py-2 px-3">Diagnostic</th>
+                        <th className="py-2 px-3">Code / HTTP</th>
+                        <th className="py-2 px-3">Diagnostic &amp; Remédiation</th>
                         <th className="py-2 pl-3 text-right">Action</th>
                       </tr>
                     </thead>
@@ -370,7 +370,12 @@ function ProviderConsoleView({ onExit }) {
                       {errorLogs.map((item) => (
                         <tr key={item.id} className="border-b border-slate-100">
                           <td className="py-2 pr-3 whitespace-nowrap text-slate-500">
-                            {new Date(item.created_at).toLocaleString("fr-FR")}
+                            <div>{new Date(item.last_seen_at || item.created_at).toLocaleString("fr-FR")}</div>
+                            {(item.occurrences_count || 1) > 1 && (
+                              <span className="inline-block mt-0.5 px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 font-semibold text-[10px]">
+                                x{item.occurrences_count} occurrences
+                              </span>
+                            )}
                           </td>
                           <td className="py-2 px-3 font-medium">{item.tenant_name}</td>
                           <td className="py-2 px-3">
@@ -379,9 +384,17 @@ function ProviderConsoleView({ onExit }) {
                             </span>
                           </td>
                           <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
-                            {item.error_code || "ERR"} {item.endpoint ? `• ${item.endpoint}` : ""}
+                            <div>{item.error_code || "ERR"} {item.http_status ? `(${item.http_status})` : ""}</div>
+                            {item.endpoint && <div className="text-[10px] text-slate-400">{item.endpoint}</div>}
                           </td>
-                          <td className="py-2 px-3 text-slate-700">{item.summary}</td>
+                          <td className="py-2 px-3 text-slate-700">
+                            <div>{item.summary}</div>
+                            {item.recommended_action && (
+                              <div className="text-[11px] text-indigo-700 mt-0.5">
+                                Action : {item.recommended_action}
+                              </div>
+                            )}
+                          </td>
                           <td className="py-2 pl-3 text-right">
                             <button
                               type="button"

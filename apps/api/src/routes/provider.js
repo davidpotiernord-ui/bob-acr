@@ -335,6 +335,10 @@ router.get("/errors", async (req, res) => {
         e.category,
         e.severity,
         e.error_code,
+        e.http_status,
+        e.occurrences_count,
+        e.last_seen_at,
+        e.recommended_action,
         e.summary,
         e.endpoint,
         e.resolved_at,
@@ -342,7 +346,7 @@ router.get("/errors", async (req, res) => {
       FROM provider_error_logs e
       LEFT JOIN tenants t ON t.id = e.tenant_id
       ${whereClause}
-      ORDER BY e.created_at DESC
+      ORDER BY COALESCE(e.last_seen_at, e.created_at) DESC
       LIMIT ${params.length}
       `,
       params

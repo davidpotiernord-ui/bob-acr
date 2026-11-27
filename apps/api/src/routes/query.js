@@ -1,3 +1,4 @@
+const { logProviderError } = require('../services/errorLogger');
 const express = require("express");
 const crypto = require("crypto");
 const db = require("../services/db");
@@ -54,6 +55,16 @@ async function notifyReferentWebhook({ tenantName, reference, channel, moduleCod
       }),
     });
   } catch (err) {
+    await logProviderError({
+      tenantId: req.tenant?.id || null,
+      category: 'rag_query',
+      severity: 'error',
+      errorCode: err?.code || 'RAG_QUERY_FAIL',
+      httpStatus: 500,
+      summary: err?.message || 'Erreur moteur RAG ou appel LLM Mistral',
+      endpoint: 'POST /api/query',
+      recommendedAction: 'Contrôler la disponibilité Mistral API et l’index HNSW pgvector.',
+    });
     console.error("Erreur notification webhook référent:", err.message);
   }
 }
