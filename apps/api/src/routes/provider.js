@@ -8,7 +8,7 @@ const router = express.Router();
 async function runProviderQuery(sql, params = []) {
 const client = await db.pool.connect();
 try {
-await client.query("SELECT set_config('app.current_tenant_id', NULL, false)");
+await client.query("SELECT set_config('app.current_tenant_id', NULL, false), set_config('app.provider_mode', 'on', false)");
 return await client.query(sql, params);
 } finally {
 client.release();
