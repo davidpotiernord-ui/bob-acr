@@ -65,9 +65,9 @@
       badgeEl.style.display = n > 0 ? "inline-block" : "none";
     };
 
-    chrome.storage?.local?.get(["bobBadgeCount"], (res) => {
-      if (typeof res?.bobBadgeCount === "number") setOverlayBadge(res.bobBadgeCount);
-    });
+    try { if (chrome.runtime?.id) chrome.storage?.local?.get(["bobBadgeCount"], (res) => {
+      if (!chrome.runtime?.lastError && typeof res?.bobBadgeCount === "number") setOverlayBadge(res.bobBadgeCount);
+    }); } catch {}
     chrome.storage?.onChanged?.addListener((changes) => {
       if (changes.bobBadgeCount) setOverlayBadge(changes.bobBadgeCount.newValue);
     });
@@ -149,7 +149,7 @@
     }
   });
 
-  setInterval(() => {
+  const bobBadgeInterval = setInterval(() => {
     try {
       if (!chrome.runtime?.id) return;
       chrome.runtime?.sendMessage?.({ type: "BOB_GET_BADGE" }, (res) => {
@@ -161,6 +161,9 @@
         }
       });
     } catch {}
+    if (!chrome.runtime?.id) {
+      clearInterval(bobBadgeInterval);
+    }
   }, 5000);
 
   ensureOverlay();

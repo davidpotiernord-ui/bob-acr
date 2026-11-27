@@ -16,7 +16,11 @@ class ShadowErrorBoundary extends React.Component {
       return (
         <div style={{ padding: 16, fontFamily: "system-ui, sans-serif", fontSize: 12, color: "#991b1b", background: "#fef2f2", height: "100%" }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Erreur BOB</div>
-          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{String(this.state.error?.message || this.state.error)}</pre>
+          <div style={{ color: "#475569", lineHeight: 1.5 }}>
+    {String(this.state.error?.message || "").includes("Extension context invalidated")
+      ? "L'extension BOB a été mise à jour ou rechargée. Rechargez cette page (Cmd + R) pour réactiver l'assistant."
+      : String(this.state.error?.message || this.state.error)}
+  </div>
         </div>
       );
     }
