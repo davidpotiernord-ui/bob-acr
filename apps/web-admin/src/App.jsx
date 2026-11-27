@@ -145,7 +145,7 @@ function ProviderConsoleView({ onExit }) {
           module_code: newDocModule,
           version: newDocVersion.trim() || "1.0",
           content: newDocContent,
-          status: "active",
+          status: "published",
         }),
       });
       const data = await res.json();
@@ -161,7 +161,8 @@ function ProviderConsoleView({ onExit }) {
   };
 
   const handleToggleDocStatus = async (doc) => {
-    const nextStatus = doc.status === "active" ? "archived" : "active";
+    const isActive = doc.status === "published" || doc.status === "active";
+    const nextStatus = isActive ? "archived" : "published";
     try {
       const res = await fetch(`${API_BASE}/provider/shared-documents/${doc.id}/status`, {
         method: "PATCH",
@@ -349,7 +350,7 @@ function ProviderConsoleView({ onExit }) {
                       <div className="space-y-1">
                         <div className="font-semibold text-slate-900">{doc.title}</div>
                         <div className="text-slate-500">
-                          Module : <span className="font-mono">{doc.module_code}</span> • v{doc.version} • Statut : <b>{doc.status}</b>
+                          Module : <span className="font-mono">{doc.module_code}</span> • v{doc.version} • Segments RAG : <b>{doc.chunks_count ?? 0}</b> • Statut : <b>{doc.status}</b>
                         </div>
                         <div className="text-[11px] font-mono text-slate-400 break-all">
                           SHA-256 : {doc.sha256_hash}
@@ -360,7 +361,7 @@ function ProviderConsoleView({ onExit }) {
                         onClick={() => handleToggleDocStatus(doc)}
                         className="px-2.5 py-1 rounded border border-slate-300 text-[11px] font-medium hover:bg-slate-100 shrink-0"
                       >
-                        {doc.status === "active" ? "Archiver" : "Activer"}
+                        {(doc.status === "published" || doc.status === "active") ? "Archiver" : "Publier"}
                       </button>
                     </div>
                   ))}
