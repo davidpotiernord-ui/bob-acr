@@ -304,4 +304,78 @@ return res.status(500).json({ error: "Erreur mise à jour statut document" });
 }
 });
 
+
+// 4. Journal d'erreurs techniques par tenant (maintenance opérateur)
+router.get("/errors", async (req, res) => {
+  try {
+    const { tenant_id, status = "open", limit = "50" } = req.query || {};
+    const params = [];
+    const conditions = [];
+
+    if (tenant_id && tenant_id !== "all") {
+      params.push(tenant_id);
+      conditions.push(`e.tenant_id = ${params.length}::uuid`);
+    }
+    if (status === "open") {
+      conditions.push("e.resolved_at IS NULL");
+    } else if (status === "resolved") {
+      conditions.push("e.resolved_at IS NOT NULL");
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+    params.push(safeLimit);
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const { rows } = await runProviderQuery(
+      `
+      SELECT
+        e.id,
+        e.tenant_id,
+        COALESCE(t.name, 'Plateforme globale') AS tenant_name,
+        e.category,
+        e.severity,
+        e.error_code,
+        e.summary,
+        e.endpoint,
+        e.resolved_at,
+        e.created_at
+      FROM provider_error_logs e
+      LEFT JOIN tenants t ON t.id = e.tenant_id
+      ${whereClause}
+      ORDER BY e.created_at DESC
+      LIMIT ${params.length}
+      `,
+      params
+    );
+
+    return res.json({ errors: rows });
+  } catch (err) {
+    console.error("[provider/errors GET]", err);
+    return res.status(500).json({ error: "Erreur lecture journal d'erreurs" });
+  }
+});
+
+router.patch("/errors/:id/resolve", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { resolved = true } = req.body || {};
+    const { rows } = await runProviderQuery(
+      `
+      UPDATE provider_error_logs
+      SET resolved_at = CASE WHEN $1 THEN NOW() ELSE NULL END
+      WHERE id = $2::uuid
+      RETURNING id, resolved_at
+      `,
+      [Boolean(resolved), id]
+    );
+    if (!rows[0]) {
+      return res.status(404).json({ error: "Entrée de journal introuvable." });
+    }
+    return res.json({ error_log: rows[0] });
+  } catch (err) {
+    console.error("[provider/errors PATCH]", err);
+    return res.status(500).json({ error: "Erreur acquittement incident" });
+  }
+});
+
 module.exports = router;

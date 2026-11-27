@@ -80,6 +80,9 @@ function ProviderConsoleView({ onExit }) {
   const [overview, setOverview] = useState(null);
   const [tenants, setTenants] = useState([]);
   const [sharedDocs, setSharedDocs] = useState([]);
+  const [errorLogs, setErrorLogs] = useState([]);
+  const [selectedErrorTenant, setSelectedErrorTenant] = useState("all");
+  const [errorStatusFilter, setErrorStatusFilter] = useState("open");
   const [newDocTitle, setNewDocTitle] = useState("");
   const [newDocModule, setNewDocModule] = useState("socle_ri");
   const [newDocVersion, setNewDocVersion] = useState("1.0");
@@ -92,23 +95,30 @@ function ProviderConsoleView({ onExit }) {
     setError("");
     const headers = { "x-provider-key": keyToUse, "Content-Type": "application/json" };
     try {
-      const [ovRes, tenRes, docRes] = await Promise.all([
+      const errParams = new URLSearchParams({
+        tenant_id: selectedErrorTenant,
+        status: errorStatusFilter,
+      });
+      const [ovRes, tenRes, docRes, errRes] = await Promise.all([
         fetch(`${API_BASE}/provider/overview`, { headers }),
         fetch(`${API_BASE}/provider/tenants`, { headers }),
         fetch(`${API_BASE}/provider/shared-documents`, { headers }),
+        fetch(`${API_BASE}/provider/errors?${errParams.toString()}`, { headers }),
       ]);
       if (!ovRes.ok) {
         const errData = await ovRes.json().catch(() => ({}));
         throw new Error(errData.error || `Erreur HTTP ${ovRes.status}`);
       }
-      const [ovData, tenData, docData] = await Promise.all([
+      const [ovData, tenData, docData, errData] = await Promise.all([
         ovRes.json(),
         tenRes.json(),
         docRes.json(),
+        errRes.ok ? errRes.json() : Promise.resolve({ errors: [] }),
       ]);
       setOverview(ovData);
       setTenants(tenData.tenants || []);
       setSharedDocs(docData.documents || []);
+      setErrorLogs(errData.errors || []);
     } catch (err) {
       setError(err.message || "Impossible de charger la Console Provider");
     } finally {
@@ -118,7 +128,18 @@ function ProviderConsoleView({ onExit }) {
 
   useEffect(() => {
     if (providerKey) loadProviderData(providerKey);
-  }, [providerKey]);
+  }, [providerKey, selectedErrorTenant, errorStatusFilter]);
+
+  const handleResolveErrorLog = async (item) => {
+    try {
+      const res = await fetch(`${API_BASE}/provider/errors/${item.id}/resolve`, {
+        method: "PATCH",
+        headers: { "x-provider-key": providerKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ resolved: !item.resolved_at }),
+      });
+      if (res.ok) await loadProviderData(providerKey);
+    } catch (_) {}
+  };
 
   const handleConnect = (e) => {
     e.preventDefault();
@@ -294,6 +315,88 @@ function ProviderConsoleView({ onExit }) {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+
+            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">Journal d'erreurs par tenant (Maintenance)</h2>
+                  <p className="text-xs text-slate-500">
+                    Incidents techniques isolés par organisation (zéro PII salarié, zéro contenu de prompt).
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <select
+                    value={selectedErrorTenant}
+                    onChange={(e) => setSelectedErrorTenant(e.target.value)}
+                    className="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="all">Tous les tenants</option>
+                    {tenants.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={errorStatusFilter}
+                    onChange={(e) => setErrorStatusFilter(e.target.value)}
+                    className="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="open">Incidents ouverts</option>
+                    <option value="resolved">Acquittés</option>
+                    <option value="all">Tout l'historique</option>
+                  </select>
+                </div>
+              </div>
+
+              {errorLogs.length === 0 ? (
+                <div className="text-xs text-slate-500 py-4 text-center border border-dashed border-slate-200 rounded-lg">
+                  Aucun incident technique sur ce filtre.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500">
+                        <th className="py-2 pr-3">Date</th>
+                        <th className="py-2 px-3">Organisation</th>
+                        <th className="py-2 px-3">Catégorie</th>
+                        <th className="py-2 px-3">Code / Endpoint</th>
+                        <th className="py-2 px-3">Diagnostic</th>
+                        <th className="py-2 pl-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {errorLogs.map((item) => (
+                        <tr key={item.id} className="border-b border-slate-100">
+                          <td className="py-2 pr-3 whitespace-nowrap text-slate-500">
+                            {new Date(item.created_at).toLocaleString("fr-FR")}
+                          </td>
+                          <td className="py-2 px-3 font-medium">{item.tenant_name}</td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 font-mono text-[11px]">
+                              {item.category}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-mono text-[11px] text-slate-600">
+                            {item.error_code || "ERR"} {item.endpoint ? `• ${item.endpoint}` : ""}
+                          </td>
+                          <td className="py-2 px-3 text-slate-700">{item.summary}</td>
+                          <td className="py-2 pl-3 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleResolveErrorLog(item)}
+                              className="px-2.5 py-1 rounded border border-slate-300 text-[11px] font-medium hover:bg-slate-100"
+                            >
+                              {item.resolved_at ? "Rouvrir" : "Acquitter"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             <div className="grid md:grid-cols-2 gap-6">
