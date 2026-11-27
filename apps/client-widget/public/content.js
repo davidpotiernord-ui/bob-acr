@@ -12,8 +12,17 @@
     if (typeof window.mountBobShadowWidget === "function") {
       return Promise.resolve();
     }
+    if (!chrome.runtime?.id) {
+      return Promise.reject(new Error("Contexte extension expiré : rechargez la page (Cmd+R)."));
+    }
     if (!embedBundlePromise) {
-      embedBundlePromise = import(chrome.runtime.getURL("widget-embed.js")).catch((err) => {
+      let url;
+      try {
+        url = chrome.runtime.getURL("widget-embed.js");
+      } catch (err) {
+        return Promise.reject(new Error("Contexte extension expiré : rechargez la page (Cmd+R)."));
+      }
+      embedBundlePromise = import(url).catch((err) => {
         embedBundlePromise = null;
         throw err;
       });
@@ -78,7 +87,7 @@
 
     const styleLink = document.createElement("link");
     styleLink.rel = "stylesheet";
-    styleLink.href = chrome.runtime.getURL("widget-embed.css");
+    try { if (chrome.runtime?.id) styleLink.href = chrome.runtime.getURL("widget-embed.css"); } catch {}
     shadow.appendChild(styleLink);
 
     const resetStyle = document.createElement("style");
@@ -101,10 +110,18 @@
     let mounted = false;
     const ensureWidgetMounted = async () => {
       if (mounted) return;
-      await loadEmbedBundle();
-      if (typeof window.mountBobShadowWidget === "function") {
-        window.mountBobShadowWidget(shadow);
-        mounted = true;
+      try {
+        await loadEmbedBundle();
+        if (typeof window.mountBobShadowWidget === "function") {
+          window.mountBobShadowWidget(shadow);
+          mounted = true;
+        }
+      } catch (err) {
+        const fallback = document.createElement("div");
+        fallback.style.cssText = "padding:16px;font-size:13px;color:#b91c1c;background:#fef2f2;";
+        fallback.textContent = "Extension mise à jour : rechargez la page (Cmd + R) pour réactiver BOB.";
+        shadow.appendChild(fallback);
+        throw err;
       }
     };
 
@@ -119,7 +136,7 @@
 
     host.appendChild(btn);
     host.appendChild(panel);
-    mountTarget.appendChild(host);
+    try { mountTarget.appendChild(host); } catch (err) { console.error("BOB mountTarget appendChild error:", err); }
     return { panel, shadow, ensureWidgetMounted };
   }
 
@@ -158,7 +175,7 @@
     }
   }, 1500);
 
-  chrome.runtime.onMessage.addListener((msg) => {
+  if (chrome.runtime?.id && chrome.runtime?.onMessage?.addListener) { try { chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === "BOB_OPEN_OVERLAY_WITH_SELECTION") {
       const { panel, ensureWidgetMounted } = ensureOverlay();
       if (panel) panel.style.display = "block";
@@ -168,5 +185,7 @@
         }
       });
     }
-  });
+    });
+  } catch (err) { console.error("BOB onMessage error:", err); }
+}
 })();
