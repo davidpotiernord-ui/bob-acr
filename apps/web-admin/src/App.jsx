@@ -71,7 +71,60 @@ export default function App() {
   if (referentToken) return <DedicatedReferentPortal token={referentToken} apiBase={API_BASE} />;
   const [tab, setTab] = useState('referent');
   const [useSharedBase, setUseSharedBase] = useState(true);
-  const [authMode, setAuthMode] = useState('sso');
+  const [authMode, setAuthMode] = useState('local_email');
+  const [ssoProvider, setSsoProvider] = useState('microsoft_entra');
+  const [ssoIssuerUrl, setSsoIssuerUrl] = useState('');
+  const [ssoClientId, setSsoClientId] = useState('');
+  const [ssoClientSecret, setSsoClientSecret] = useState('');
+  const [hasClientSecret, setHasClientSecret] = useState(false);
+  const [allowedDomainsInput, setAllowedDomainsInput] = useState('atelier-sud.fr');
+  const [ssoSaving, setSsoSaving] = useState(false);
+  const [ssoSaveFeedback, setSsoSaveFeedback] = useState('');
+
+  const loadTenantSsoConfig = async () => {
+    try {
+      const res = await fetch(`${API_ORIGIN}/auth/tenant-config`, { headers: buildAuthHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.tenant) {
+        setAuthMode(data.tenant.auth_mode || 'local_email');
+        setSsoProvider(data.tenant.sso_provider || 'microsoft_entra');
+        setSsoIssuerUrl(data.tenant.sso_issuer_url || '');
+        setSsoClientId(data.tenant.sso_client_id || '');
+        setHasClientSecret(Boolean(data.tenant.has_client_secret));
+        setAllowedDomainsInput(Array.isArray(data.tenant.allowed_email_domains) ? data.tenant.allowed_email_domains.join(', ') : '');
+      }
+    } catch (_) {}
+  };
+
+  const handleSaveTenantSsoConfig = async (e) => {
+    e.preventDefault();
+    setSsoSaving(true);
+    setSsoSaveFeedback('');
+    try {
+      const res = await fetch(`${API_ORIGIN}/auth/tenant-config`, {
+        method: 'PUT',
+        headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          auth_mode: authMode,
+          sso_provider: ssoProvider,
+          sso_issuer_url: ssoIssuerUrl,
+          sso_client_id: ssoClientId,
+          sso_client_secret: ssoClientSecret,
+          allowed_email_domains: allowedDomainsInput,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur sauvegarde');
+      setHasClientSecret(Boolean(data.tenant?.has_client_secret));
+      setSsoClientSecret('');
+      setSsoSaveFeedback('Configuration enregistrée avec succès.');
+    } catch (err) {
+      setSsoSaveFeedback(`Erreur : ${err.message}`);
+    } finally {
+      setSsoSaving(false);
+    }
+  };
   const [exported, setExported] = useState(false);
   const [sessionUser, setSessionUser] = useState(() => getStoredSessionUser());
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -179,6 +232,7 @@ export default function App() {
       hydrateFromToken(getSessionToken());
     }
     fetchAll();
+    loadTenantSsoConfig();
   }, []);
 
   const handleDiscoverAuth = async (e) => {
@@ -559,6 +613,22 @@ export default function App() {
           >
             Effacer
           </button>
+          <button
+            type="button"
+            onClick={() => setAuthModalOpen((v) => !v)}
+            className="rounded bg-emerald-600 hover:bg-emerald-500 px-3 py-1 font-medium text-white shrink-0"
+          >
+            {sessionUser ? `${sessionUser.email} (${sessionUser.role})` : "Connexion SSO / Email"}
+          </button>
+          {sessionUser && (
+            <button
+              type="button"
+              onClick={handleSessionLogout}
+              className="rounded bg-rose-700 hover:bg-rose-600 px-2.5 py-1 font-medium text-white shrink-0"
+            >
+              Déconnexion
+            </button>
+          )}
         </div>
       </div>
 
@@ -990,7 +1060,7 @@ export default function App() {
           )}
 
           {tab === 'settings' && (
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-2 gap-4 items-start">
               <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
                 <div className="flex items-center gap-2 font-semibold text-sm">
                   <Lock className="w-4 h-4 text-indigo-600" /> Socle commun
@@ -1003,23 +1073,110 @@ export default function App() {
                     onChange={(e) => setUseSharedBase(e.target.checked)}
                   />
                 </label>
+                <div className="pt-2 border-t border-slate-100 text-xs text-slate-500 space-y-1">
+                  <p className="font-medium text-slate-700">URI de redirection OIDC (Callback) :</p>
+                  <code className="block bg-slate-100 px-2.5 py-1.5 rounded text-[11px] text-slate-800 break-all">
+                    {API_ORIGIN}/auth/sso/callback
+                  </code>
+                </div>
               </div>
-              <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
-                <div className="font-semibold text-sm">Authentification</div>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="radio" name="auth" checked={authMode === 'sso'} onChange={() => setAuthMode('sso')} />
-                  <span>SSO (Entra ID / Google)</span>
-                </label>
-                <label className="flex items-center gap-2 text-sm">
+              <form onSubmit={handleSaveTenantSsoConfig} className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+                <div className="font-semibold text-sm">Authentification de l'organisation</div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="auth"
+                      checked={authMode === 'local_email'}
+                      onChange={() => setAuthMode('local_email')}
+                    />
+                    <span>Sans SSO (Email pro + Mot de passe local)</span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="auth"
+                      checked={authMode === 'sso'}
+                      onChange={() => setAuthMode('sso')}
+                    />
+                    <span>SSO OIDC (Microsoft Entra ID / Google Workspace)</span>
+                  </label>
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-medium text-slate-700">Domaines email autorisés (séparés par virgule)</label>
                   <input
-                    type="radio"
-                    name="auth"
-                    checked={authMode === 'local_email'}
-                    onChange={() => setAuthMode('local_email')}
+                    type="text"
+                    value={allowedDomainsInput}
+                    onChange={(e) => setAllowedDomainsInput(e.target.value)}
+                    placeholder="entreprise.fr, filiale.fr"
+                    className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5"
                   />
-                  <span>Sans SSO (Email pro + OTP)</span>
-                </label>
-              </div>
+                </div>
+                {authMode === 'sso' && (
+                  <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Fournisseur d'identité</label>
+                      <select
+                        value={ssoProvider}
+                        onChange={(e) => setSsoProvider(e.target.value)}
+                        className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white"
+                      >
+                        <option value="microsoft_entra">Microsoft Entra ID (Azure AD)</option>
+                        <option value="google">Google Workspace</option>
+                        <option value="oidc">Autre fournisseur OIDC standard (Okta, Keycloak...)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">OIDC Issuer URL</label>
+                      <input
+                        type="url"
+                        required
+                        value={ssoIssuerUrl}
+                        onChange={(e) => setSsoIssuerUrl(e.target.value)}
+                        placeholder={ssoProvider === 'google' ? 'https://accounts.google.com' : 'https://login.microsoftonline.com/<TENANT_ID>/v2.0'}
+                        className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Client ID</label>
+                      <input
+                        type="text"
+                        required
+                        value={ssoClientId}
+                        onChange={(e) => setSsoClientId(e.target.value)}
+                        placeholder="00000000-0000-0000-0000-000000000000"
+                        className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Client Secret {hasClientSecret ? '(déjà enregistré — laisser vide pour conserver)' : ''}
+                      </label>
+                      <input
+                        type="password"
+                        value={ssoClientSecret}
+                        onChange={(e) => setSsoClientSecret(e.target.value)}
+                        placeholder={hasClientSecret ? '••••••••••••••••' : 'Secret OIDC client'}
+                        className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+                <div className="pt-2 flex items-center justify-between gap-2">
+                  <button
+                    type="submit"
+                    disabled={ssoSaving}
+                    className="rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 px-3.5 py-1.5 text-xs font-medium text-white"
+                  >
+                    {ssoSaving ? 'Enregistrement...' : 'Enregistrer la configuration'}
+                  </button>
+                  {ssoSaveFeedback && (
+                    <span className={`text-xs ${ssoSaveFeedback.startsWith('Erreur') ? 'text-rose-600' : 'text-emerald-600 font-medium'}`}>
+                      {ssoSaveFeedback}
+                    </span>
+                  )}
+                </div>
+              </form>
             </div>
           )}
         </main>
