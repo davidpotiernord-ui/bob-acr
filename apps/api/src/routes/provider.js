@@ -5,6 +5,18 @@ const { embedText } = require("../services/llm");
 
 const router = express.Router();
 
+async function runProviderQuery(sql, params = []) {
+const client = await db.pool.connect();
+try {
+await client.query("SELECT set_config('app.current_tenant_id', NULL, false)");
+return await client.query(sql, params);
+} finally {
+client.release();
+}
+}
+
+
+
 function toVector1536Literal(embedding) {
 const targetDim = 1536;
 const arr = Array.isArray(embedding) ? embedding.slice(0, targetDim) : [];
@@ -46,13 +58,13 @@ router.get("/overview", async (req, res) => {
 try {
 const start = Date.now();
 const [{ rows: rlsRows }, { rows: kpiRows }, { rows: moduleRows }] = await Promise.all([
-  db.query(`
+  runProviderQuery(`
     SELECT relname, relrowsecurity, relforcerowsecurity
     FROM pg_class
     WHERE relname IN ('documents', 'document_chunks', 'users', 'query_logs')
     ORDER BY relname
   `),
-  db.query(`
+  runProviderQuery(`
     SELECT
       (SELECT COUNT(*)::int FROM tenants) AS tenants_count,
       (SELECT COUNT(*)::int FROM tenants WHERE COALESCE(use_shared_base, true) = true) AS shared_base_tenants_count,
@@ -62,7 +74,7 @@ const [{ rows: rlsRows }, { rows: kpiRows }, { rows: moduleRows }] = await Promi
       (SELECT COUNT(*)::int FROM query_logs WHERE unanswered_flag = true) AS unanswered_queries_count,
       (SELECT COUNT(*)::int FROM query_logs WHERE was_escalated = true) AS escalated_queries_count
   `),
-  db.query(`
+  runProviderQuery(`
     SELECT
       COALESCE(module_code, 'non_classe') AS module_code,
       COUNT(*)::int AS queries_count,
@@ -91,7 +103,7 @@ return res.status(500).json({ error: "Erreur lecture supervision plateforme" });
 // 2. Statistiques agrégées par tenant (aucune identité salarié ni contenu de flux)
 router.get("/tenants", async (req, res) => {
 try {
-const { rows } = await db.query(`
+const { rows } = await runProviderQuery(`
   SELECT
     t.id,
     t.name,
@@ -125,7 +137,7 @@ return res.status(500).json({ error: "Erreur chargement statistiques tenants" })
 // 3. Catalogue du socle mutualisé (is_shared_base = true)
 router.get("/shared-documents", async (req, res) => {
 try {
-const { rows } = await db.query(`
+const { rows } = await runProviderQuery(`
   SELECT
     d.id,
     d.module_code,
@@ -270,7 +282,7 @@ if (!["draft", "published", "active", "archived"].includes(status)) {
 }
 const normalizedStatus = status === "active" ? "published" : status;
 
-const { rows } = await db.query(
+const { rows } = await runProviderQuery(
   `
   UPDATE documents
   SET status = $1,
