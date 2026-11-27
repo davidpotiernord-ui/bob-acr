@@ -176,18 +176,18 @@ try {
     const onStorageChanged = (changes, areaName) => {
       if (areaName === "local" && changes.bobPendingSelection?.newValue?.text) {
         loadExcerpt(changes.bobPendingSelection.newValue);
-        chrome.storage.local.remove("bobPendingSelection").catch(() => {});
+        window.chrome?.storage?.local?.remove("bobPendingSelection")?.catch?.(() => {});
       }
     };
 
     const onWindowMessage = (event) => {
       if (event.data?.type === "BOB_PANEL_OPENED") {
-        loadPendingPushes();
+        syncPendingPushes();
         syncTrackedStatuses();
       }
       if (event.data?.type === "BOB_SELECTION_PAYLOAD" && event.data?.payload?.text) {
         loadExcerpt(event.data.payload);
-        window.chrome?.storage?.local?.remove("bobPendingSelection").catch(() => {});
+        window.chrome?.storage?.local?.remove("bobPendingSelection")?.catch?.(() => {});
       }
     };
     window.addEventListener("message", onWindowMessage);
@@ -197,11 +197,13 @@ try {
     }
 
     return () => {
-      clearInterval(pollInterval);
-      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("message", onWindowMessage);
       if (window.chrome?.storage?.onChanged) {
-        chrome.storage.onChanged.removeListener(onStorageChanged);
+        try {
+          chrome.storage.onChanged.removeListener(onStorageChanged);
+        } catch {
+          // Ignore si le contexte extension est déjà invalidé
+        }
       }
     };
   }, []);
