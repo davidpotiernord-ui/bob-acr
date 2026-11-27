@@ -24,11 +24,42 @@ import {
 const API_BASE = import.meta.env.VITE_API_URL || 'https://bob-acr-api.osc-fr1.scalingo.io/api';
 const DEMO_TENANT_ID = '11111111-1111-1111-1111-111111111111';
 
+const API_ORIGIN = API_BASE.replace(/\/api\/?$/, "");
+const SESSION_TOKEN_KEY = "bob_session_token";
+const SESSION_USER_KEY = "bob_session_user";
+
+function getSessionToken() {
+  if (typeof window === "undefined") return "";
+  return window.sessionStorage?.getItem(SESSION_TOKEN_KEY) || "";
+}
+
+function setSessionToken(token) {
+  if (typeof window === "undefined") return;
+  if (token) window.sessionStorage?.setItem(SESSION_TOKEN_KEY, token);
+  else window.sessionStorage?.removeItem(SESSION_TOKEN_KEY);
+}
+
+function getStoredSessionUser() {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(window.sessionStorage?.getItem(SESSION_USER_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function setStoredSessionUser(user) {
+  if (typeof window === "undefined") return;
+  if (user) window.sessionStorage?.setItem(SESSION_USER_KEY, JSON.stringify(user));
+  else window.sessionStorage?.removeItem(SESSION_USER_KEY);
+}
+
 function getAuthHeaders(extra = {}) {
   const token =
-    (typeof window !== 'undefined' && window.sessionStorage?.getItem('bob_admin_key')) ||
+    getSessionToken() ||
+    (typeof window !== "undefined" && window.sessionStorage?.getItem("bob_admin_key")) ||
     import.meta.env.VITE_BOB_ADMIN_KEY ||
-    '';
+    "";
   return {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...extra,
@@ -42,6 +73,13 @@ export default function App() {
   const [useSharedBase, setUseSharedBase] = useState(true);
   const [authMode, setAuthMode] = useState('sso');
   const [exported, setExported] = useState(false);
+  const [sessionUser, setSessionUser] = useState(() => getStoredSessionUser());
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authDiscovery, setAuthDiscovery] = useState(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authFeedback, setAuthFeedback] = useState("");
 
   const [overview, setOverview] = useState(null);
   const [documents, setDocuments] = useState([]);
@@ -77,7 +115,6 @@ export default function App() {
         fetch(`${API_BASE}/documents`, { headers }),
         fetch(`${API_BASE}/acknowledgments`, { headers }),
         fetch(`${API_BASE}/admin/escalations`, { headers }),
-        fetch(`${API_BASE}/admin/pushes/responses`, { headers }),,
         fetch(`${API_BASE}/admin/pushes/responses`, { headers }),
       ]);
 
@@ -107,9 +144,103 @@ export default function App() {
     }
   };
 
+  const hydrateFromToken = async (token) => {
+    if (!token) return null;
+    try {
+      const res = await fetch(`${API_ORIGIN}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data.tenant?.authMode) setAuthMode(data.tenant.authMode);
+      if (data.user) {
+        setSessionUser(data.user);
+        setStoredSessionUser(data.user);
+      }
+      return data;
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const hash = window.location.hash || "";
+      const match = hash.match(/bob_token=([^&]+)/);
+      if (match) {
+        const tok = decodeURIComponent(match[1]);
+        setSessionToken(tok);
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        hydrateFromToken(tok).then(() => fetchAll());
+        return;
+      }
+    }
+    if (getSessionToken()) {
+      hydrateFromToken(getSessionToken());
+    }
     fetchAll();
   }, []);
+
+  const handleDiscoverAuth = async (e) => {
+    e.preventDefault();
+    setAuthFeedback("");
+    setAuthBusy(true);
+    try {
+      const redirectUri = typeof window !== "undefined" ? window.location.origin + window.location.pathname : undefined;
+      const res = await fetch(`${API_ORIGIN}/auth/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail.trim().toLowerCase(), redirectUri }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Organisation introuvable");
+      setAuthDiscovery(data);
+    } catch (err) {
+      setAuthFeedback(err.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleLocalPasswordLogin = async (e) => {
+    e.preventDefault();
+    setAuthFeedback("");
+    setAuthBusy(true);
+    try {
+      const res = await fetch(`${API_ORIGIN}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail.trim().toLowerCase(), password: authPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Identifiants invalides");
+      setSessionToken(data.token);
+      setSessionUser(data.user);
+      setStoredSessionUser(data.user);
+      setAuthPassword("");
+      setAuthModalOpen(false);
+      await fetchAll();
+    } catch (err) {
+      setAuthFeedback(err.message);
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleSessionLogout = async () => {
+    const tok = getSessionToken();
+    if (tok) {
+      await fetch(`${API_ORIGIN}/auth/logout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tok}` },
+      }).catch(() => {});
+    }
+    setSessionToken("");
+    setSessionUser(null);
+    setStoredSessionUser(null);
+    setAuthDiscovery(null);
+    await fetchAll();
+  };
 
   const handlePublish = async (e) => {
     e.preventDefault();
@@ -431,6 +562,54 @@ export default function App() {
         </div>
       </div>
 
+      {authModalOpen && (
+        <div className="bg-slate-800 text-slate-100 px-6 py-4 border-b border-slate-700 text-xs">
+          <div className="max-w-3xl mx-auto space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-sm text-white">Connexion utilisateur (SSO OIDC ou Email / Mot de passe)</span>
+              <button type="button" onClick={() => setAuthModalOpen(false)} className="text-slate-400 hover:text-white">Fermer</button>
+            </div>
+            <form onSubmit={handleDiscoverAuth} className="flex flex-wrap gap-2 items-center">
+              <input
+                type="email"
+                required
+                value={authEmail}
+                onChange={(e) => { setAuthEmail(e.target.value); setAuthDiscovery(null); }}
+                placeholder="prenom.nom@organisation.fr"
+                className="flex-1 min-w-[220px] rounded bg-slate-900 border border-slate-600 px-3 py-1.5 text-white"
+              />
+              <button type="submit" disabled={authBusy} className="rounded bg-sky-600 hover:bg-sky-500 px-3.5 py-1.5 font-medium text-white">
+                {authBusy ? "Détection..." : "Détecter mode"}
+              </button>
+            </form>
+            {authDiscovery?.mode === "sso" && (
+              <div className="flex flex-wrap items-center justify-between gap-2 bg-indigo-950/60 border border-indigo-700/60 rounded-lg p-3">
+                <span>Mode <strong>SSO ({authDiscovery.ssoProvider})</strong> détecté pour <strong>{authDiscovery.tenantName}</strong>.</span>
+                <a href={authDiscovery.loginUrl} className="rounded bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 font-semibold text-white no-underline">
+                  Continuer avec le SSO
+                </a>
+              </div>
+            )}
+            {authDiscovery?.mode === "local_email" && (
+              <form onSubmit={handleLocalPasswordLogin} className="flex flex-wrap gap-2 items-center bg-slate-900/70 border border-slate-700 rounded-lg p-3">
+                <span className="w-full text-slate-300">Mode <strong>Sans SSO (connexion locale)</strong> actif pour <strong>{authDiscovery.tenantName}</strong> :</span>
+                <input
+                  type="password"
+                  required
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="Mot de passe"
+                  className="flex-1 min-w-[200px] rounded bg-slate-950 border border-slate-600 px-3 py-1.5 text-white"
+                />
+                <button type="submit" disabled={authBusy} className="rounded bg-emerald-600 hover:bg-emerald-500 px-3.5 py-1.5 font-medium text-white">
+                  {authBusy ? "Connexion..." : "Se connecter"}
+                </button>
+              </form>
+            )}
+            {authFeedback && <p className="text-rose-300">{authFeedback}</p>}
+          </div>
+        </div>
+      )}
       <div className="min-h-screen flex flex-col bg-slate-50">
         <header className="bg-slate-900 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">

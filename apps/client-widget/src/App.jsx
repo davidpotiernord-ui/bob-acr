@@ -10,6 +10,7 @@ import {
   Inbox,
   RefreshCw,
 } from 'lucide-react';
+import WidgetAuthBar from "./components/WidgetAuthBar";
 import {
   askBob,
   acknowledgeDocument,
@@ -401,6 +402,7 @@ useEffect(() => {
           </div>
         </div>
       </header>
+      <WidgetAuthBar onAuthChange={() => { syncTrackedStatuses(); syncPendingPushes(); }} />
 
       {pendingPushes.length > 0 && (
   <div className="mx-3.5 mt-3 p-3 rounded-xl bg-indigo-50 border border-indigo-200 space-y-2">

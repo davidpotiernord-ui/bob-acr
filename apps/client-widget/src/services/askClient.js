@@ -1,3 +1,16 @@
+function getWidgetSessionOverride() {
+  if (typeof window === "undefined") return "";
+  const hash = window.location.hash || "";
+  const m = hash.match(/bob_token=([^&]+)/);
+  if (m) {
+    const tok = decodeURIComponent(m[1]);
+    window.localStorage?.setItem("bob_widget_session_token", tok);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    return tok;
+  }
+  return window.localStorage?.getItem("bob_widget_session_token") || "";
+}
+
 const DEFAULT_API_URL = import.meta.env.VITE_BOB_API_URL || 'https://bob-acr-api.osc-fr1.scalingo.io';
 const DEFAULT_API_KEY = import.meta.env.VITE_BOB_API_KEY || '';
 const DEFAULT_USER_EMAIL = import.meta.env.VITE_BOB_DEMO_USER_EMAIL || 'salarie.demo@atelier-sud.fr';
@@ -21,8 +34,10 @@ function getManagedConfig() {
 async function resolveAuthHeaders() {
   const managed = await getManagedConfig();
   const baseUrl = (managed.api_url || DEFAULT_API_URL).replace(/\/+$/, '');
-  const apiKey = managed.api_key || DEFAULT_API_KEY;
-  const userEmail = managed.user_email || DEFAULT_USER_EMAIL;
+  const sessionToken = (typeof window !== "undefined" && window.localStorage?.getItem("bob_widget_session_token")) || "";
+  const sessionUser = (() => { try { return JSON.parse(window.localStorage?.getItem("bob_widget_session_user") || "null"); } catch { return null; } })();
+  const apiKey = sessionToken || managed.api_key || DEFAULT_API_KEY;
+  const userEmail = sessionUser?.email || managed.user_email || DEFAULT_USER_EMAIL;
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   return { baseUrl, headers, userEmail };
