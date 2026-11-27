@@ -84,7 +84,7 @@ export default function App() {
 
   const loadTenantSsoConfig = async () => {
     try {
-      const res = await fetch(`${API_ORIGIN}/auth/tenant-config`, { headers: buildAuthHeaders() });
+      const res = await fetch(`${API_ORIGIN}/auth/tenant-config`, { headers: getAuthHeaders() });
       if (!res.ok) return;
       const data = await res.json();
       if (data.tenant) {
@@ -106,7 +106,7 @@ export default function App() {
     try {
       const res = await fetch(`${API_ORIGIN}/auth/tenant-config`, {
         method: 'PUT',
-        headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           auth_mode: authMode,
           sso_provider: ssoProvider,
