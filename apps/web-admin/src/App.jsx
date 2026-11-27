@@ -67,9 +67,329 @@ function getAuthHeaders(extra = {}) {
   };
 }
 
+
+const PROVIDER_KEY_STORAGE = "bob_provider_key";
+
+function ProviderConsoleView({ onExit }) {
+  const [providerKey, setProviderKey] = useState(() =>
+    typeof window !== "undefined" ? window.sessionStorage?.getItem(PROVIDER_KEY_STORAGE) || "" : ""
+  );
+  const [keyInput, setKeyInput] = useState(providerKey);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [overview, setOverview] = useState(null);
+  const [tenants, setTenants] = useState([]);
+  const [sharedDocs, setSharedDocs] = useState([]);
+  const [newDocTitle, setNewDocTitle] = useState("");
+  const [newDocModule, setNewDocModule] = useState("socle_ri");
+  const [newDocVersion, setNewDocVersion] = useState("1.0");
+  const [newDocContent, setNewDocContent] = useState("");
+  const [creatingDoc, setCreatingDoc] = useState(false);
+
+  const loadProviderData = async (keyToUse = providerKey) => {
+    if (!keyToUse) return;
+    setLoading(true);
+    setError("");
+    const headers = { "x-provider-key": keyToUse, "Content-Type": "application/json" };
+    try {
+      const [ovRes, tenRes, docRes] = await Promise.all([
+        fetch(`${API_BASE}/provider/overview`, { headers }),
+        fetch(`${API_BASE}/provider/tenants`, { headers }),
+        fetch(`${API_BASE}/provider/shared-documents`, { headers }),
+      ]);
+      if (!ovRes.ok) {
+        const errData = await ovRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Erreur HTTP ${ovRes.status}`);
+      }
+      const [ovData, tenData, docData] = await Promise.all([
+        ovRes.json(),
+        tenRes.json(),
+        docRes.json(),
+      ]);
+      setOverview(ovData);
+      setTenants(tenData.tenants || []);
+      setSharedDocs(docData.documents || []);
+    } catch (err) {
+      setError(err.message || "Impossible de charger la Console Provider");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (providerKey) loadProviderData(providerKey);
+  }, [providerKey]);
+
+  const handleConnect = (e) => {
+    e.preventDefault();
+    const cleaned = keyInput.trim();
+    if (typeof window !== "undefined") {
+      if (cleaned) window.sessionStorage?.setItem(PROVIDER_KEY_STORAGE, cleaned);
+      else window.sessionStorage?.removeItem(PROVIDER_KEY_STORAGE);
+    }
+    setProviderKey(cleaned);
+    if (cleaned) loadProviderData(cleaned);
+  };
+
+  const handleCreateSharedDoc = async (e) => {
+    e.preventDefault();
+    if (!newDocTitle.trim() || !providerKey) return;
+    setCreatingDoc(true);
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/provider/shared-documents`, {
+        method: "POST",
+        headers: { "x-provider-key": providerKey, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: newDocTitle.trim(),
+          module_code: newDocModule,
+          version: newDocVersion.trim() || "1.0",
+          content: newDocContent,
+          status: "active",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erreur création document");
+      setNewDocTitle("");
+      setNewDocContent("");
+      await loadProviderData(providerKey);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCreatingDoc(false);
+    }
+  };
+
+  const handleToggleDocStatus = async (doc) => {
+    const nextStatus = doc.status === "active" ? "archived" : "active";
+    try {
+      const res = await fetch(`${API_BASE}/provider/shared-documents/${doc.id}/status`, {
+        method: "PATCH",
+        headers: { "x-provider-key": providerKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (res.ok) await loadProviderData(providerKey);
+    } catch (_) {}
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 p-6">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-4 bg-white border border-slate-200 rounded-xl p-5">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-indigo-600">
+              Opérateur A.C.R. • Données agrégées uniquement
+            </div>
+            <h1 className="text-xl font-bold text-slate-900">Console Provider — A.C.R. / BOB</h1>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Zéro accès aux prompts, réponses ou identités salariés — Catalogue mutualisé &amp; télémétrie agrégée.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {providerKey && (
+              <button
+                type="button"
+                onClick={() => loadProviderData(providerKey)}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium hover:bg-slate-100"
+              >
+                Actualiser
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onExit}
+              className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-medium hover:bg-slate-800"
+            >
+              Retour Admin Client
+            </button>
+          </div>
+        </div>
+
+        <form onSubmit={handleConnect} className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center gap-3">
+          <label className="text-xs font-medium text-slate-700">Clé Opérateur (BOB_PROVIDER_KEY) :</label>
+          <input
+            type="password"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            placeholder="bob_prov_..."
+            className="flex-1 min-w-[240px] px-3 py-1.5 text-xs border border-slate-300 rounded-lg"
+          />
+          <button
+            type="submit"
+            className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700"
+          >
+            {loading ? "Connexion..." : "Authentifier"}
+          </button>
+        </form>
+
+        {error && (
+          <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl p-4">
+            {error}
+          </div>
+        )}
+
+        {overview && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="text-xs text-slate-500">Tenants actifs (Socle ON)</div>
+                <div className="text-2xl font-bold mt-1">
+                  {overview.totals?.shared_base_tenants_count ?? 0} / {overview.totals?.tenants_count ?? 0}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">Latence DB : {overview.db_latency_ms} ms</div>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="text-xs text-slate-500">Docs socle mutualisé actifs</div>
+                <div className="text-2xl font-bold mt-1">{overview.totals?.active_shared_docs_count ?? 0}</div>
+                <div className="text-[11px] text-slate-400 mt-1">is_shared_base = true</div>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="text-xs text-slate-500">Requêtes agrégées</div>
+                <div className="text-2xl font-bold mt-1">{overview.totals?.total_queries_count ?? 0}</div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Sans réponse : {overview.totals?.unanswered_queries_count ?? 0} • Escalades : {overview.totals?.escalated_queries_count ?? 0}
+                </div>
+              </div>
+              <div className="bg-white border border-slate-200 rounded-xl p-4">
+                <div className="text-xs text-slate-500">Verrou RLS PostgreSQL</div>
+                <div className="text-sm font-semibold text-emerald-700 mt-1">
+                  {(overview.rls || []).every((r) => r.relrowsecurity && r.relforcerowsecurity) ? "FORCE RLS ACTIF" : "À VÉRIFIER"}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  {(overview.rls || []).map((r) => `${r.relname}:${r.relforcerowsecurity ? "FORCE" : "OFF"}`).join(" • ")}
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+              <h2 className="text-sm font-semibold text-slate-900">Statistiques agrégées par tenant</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500">
+                      <th className="py-2 pr-3">Organisation</th>
+                      <th className="py-2 px-3">Offre</th>
+                      <th className="py-2 px-3">Auth</th>
+                      <th className="py-2 px-3">Socle commun</th>
+                      <th className="py-2 px-3">Comptes actifs</th>
+                      <th className="py-2 px-3">Docs privés</th>
+                      <th className="py-2 px-3">Requêtes</th>
+                      <th className="py-2 px-3">Escalades</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tenants.map((t) => (
+                      <tr key={t.id} className="border-b border-slate-100">
+                        <td className="py-2.5 pr-3 font-medium">{t.name}</td>
+                        <td className="py-2.5 px-3">{t.plan_tier}</td>
+                        <td className="py-2.5 px-3">{t.auth_mode}</td>
+                        <td className="py-2.5 px-3">{t.use_shared_base ? "Activé" : "Désactivé"}</td>
+                        <td className="py-2.5 px-3">{t.active_users_count}</td>
+                        <td className="py-2.5 px-3">{t.private_active_docs_count}</td>
+                        <td className="py-2.5 px-3">{t.queries_count}</td>
+                        <td className="py-2.5 px-3">{t.escalated_count}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              <form onSubmit={handleCreateSharedDoc} className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+                <h2 className="text-sm font-semibold text-slate-900">Publier un document au socle mutualisé</h2>
+                <input
+                  type="text"
+                  value={newDocTitle}
+                  onChange={(e) => setNewDocTitle(e.target.value)}
+                  placeholder="Ex. Socle Code du travail — Règlement intérieur (réf. 2026)"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <select
+                    value={newDocModule}
+                    onChange={(e) => setNewDocModule(e.target.value)}
+                    className="px-3 py-2 text-xs border border-slate-300 rounded-lg"
+                  >
+                    <option value="socle_ri">socle_ri</option>
+                    <option value="rgpd">rgpd</option>
+                    <option value="cyber">cyber</option>
+                    <option value="sapin_ii">sapin_ii</option>
+                    <option value="lcb_ft">lcb_ft</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={newDocVersion}
+                    onChange={(e) => setNewDocVersion(e.target.value)}
+                    placeholder="Version (ex. 1.0)"
+                    className="px-3 py-2 text-xs border border-slate-300 rounded-lg"
+                  />
+                </div>
+                <textarea
+                  rows={3}
+                  value={newDocContent}
+                  onChange={(e) => setNewDocContent(e.target.value)}
+                  placeholder="Texte ou référence du texte réglementaire pour calcul d'empreinte SHA-256..."
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
+                />
+                <button
+                  type="submit"
+                  disabled={creatingDoc}
+                  className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {creatingDoc ? "Publication..." : "Publier dans le socle mutualisé"}
+                </button>
+              </form>
+
+              <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+                <h2 className="text-sm font-semibold text-slate-900">Catalogue mutualisé ({sharedDocs.length})</h2>
+                <div className="space-y-2 max-h-80 overflow-y-auto">
+                  {sharedDocs.map((doc) => (
+                    <div key={doc.id} className="border border-slate-200 rounded-lg p-3 flex items-start justify-between gap-3 text-xs">
+                      <div className="space-y-1">
+                        <div className="font-semibold text-slate-900">{doc.title}</div>
+                        <div className="text-slate-500">
+                          Module : <span className="font-mono">{doc.module_code}</span> • v{doc.version} • Statut : <b>{doc.status}</b>
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400 break-all">
+                          SHA-256 : {doc.sha256_hash}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleDocStatus(doc)}
+                        className="px-2.5 py-1 rounded border border-slate-300 text-[11px] font-medium hover:bg-slate-100 shrink-0"
+                      >
+                        {doc.status === "active" ? "Archiver" : "Activer"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+        <div className="max-w-6xl mx-auto px-6 pb-6 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setProviderMode(true)}
+            className="text-xs text-slate-500 hover:text-indigo-600 underline"
+          >
+            Ouvrir Console Provider (Opérateur A.C.R.)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const referentToken = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("referent_token") : null;
+  const [providerMode, setProviderMode] = useState(() =>
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("provider") === "1" : false
+  );
   if (referentToken) return <DedicatedReferentPortal token={referentToken} apiBase={API_BASE} />;
+  if (providerMode) return <ProviderConsoleView onExit={() => setProviderMode(false)} />;
   const [tab, setTab] = useState('referent');
   const [useSharedBase, setUseSharedBase] = useState(true);
   const [authMode, setAuthMode] = useState('local_email');
